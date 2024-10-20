@@ -1,6 +1,7 @@
 package anchordb
 
 import (
+	"anchor-db/table"
 	"context"
 	"fmt"
 	"os"
@@ -67,13 +68,13 @@ type LSMStore struct{
 	path string
 	l0SSTables []int
 	levels [][]int
-	sstables map[int]SSTable
+	sstables map[int]table.SSTable
 	wg sync.WaitGroup
 	ctx context.Context
 	cancel context.CancelFunc
 }
 
-type SSTable struct{}
+
 
 func createNewLSMStore(path string, enableWal bool) (*LSMStore,error){
 	var memtable *Memtable

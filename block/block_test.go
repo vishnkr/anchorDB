@@ -98,27 +98,28 @@ func encodeTestData() []byte {
 }
 
 func TestBlockIterator(t *testing.T){
-    bb := newBlockBuilder(2000)
-    bb.Add([]byte("apple"),[]byte("value1"))
-    bb.Add([]byte("apricot"),[]byte("val2"))
-    bb.Add([]byte("banana"),[]byte("value3"))
+    bb := NewBlockBuilder(200)
+    valid := bb.Add([]byte("apple"),[]byte("value1"))
+    require.True(t,true,valid)
+    valid = bb.Add([]byte("application"),[]byte{13,14,255})
+    valid = bb.Add([]byte("apricot"),[]byte("val2"))
+    valid = bb.Add([]byte("banana"),[]byte("value3"))
+    
     block := bb.Build()
-    /*testData := encodeTestData()
-    block := Block{ data: testData}*/
     encoded:= block.encode()
     resBlock,err := decode(encoded)
     require.NoError(t,err)
     iter := createAndSeekToFirst(resBlock)
     require.True(t,iter.IsValid())
-    require.Equal(t,iter.Key(),[]byte("apple"))
-    require.Equal(t,iter.Value(),[]byte("value1"))
+    require.Equal(t,[]byte("apple"),iter.Key())
+    require.Equal(t,[]byte("value1"),iter.Value())
     iter.Next()
     require.True(t,iter.IsValid())
-    require.Equal(t,iter.Key(),[]byte("apricot"))
-    require.Equal(t,iter.Value(),[]byte("val2"))
+    require.Equal(t,[]byte("application"),iter.Key())
+    require.Equal(t,[]byte{13,14,255},iter.Value())
     iter.Next()
     require.True(t,iter.IsValid())
-    require.Equal(t,iter.Key(),[]byte("apricot"))
-    require.Equal(t,iter.Value(),[]byte("val2"))
+    require.Equal(t,[]byte("apricot"),iter.Key())
+    require.Equal(t,[]byte("val2"),iter.Value(),)
 
 }

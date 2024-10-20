@@ -9,7 +9,7 @@ type BlockBuilder struct{
 	firstKey []byte
 }
 
-func newBlockBuilder(size int) *BlockBuilder{
+func NewBlockBuilder(size int) *BlockBuilder{
 	return &BlockBuilder{
 		offsets: make([]uint16, 0),
 		data: make([]byte, 0),
@@ -46,7 +46,7 @@ func appendU16(data []byte, value uint16) []byte {
 
 
 func (b *BlockBuilder) Add(key []byte,value []byte) bool{
-	//TODO: check for empty key
+	if(len(key)==0){ return false}
 	if b.estimatedSize() + len(key) + len(value) + 3*OFFSET_SIZE > b.blockSize && !b.isEmpty(){
 		return false
 	}
