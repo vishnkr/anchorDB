@@ -22,14 +22,6 @@ type StorageOptions struct{
 	targetSstSize uint
 }
 
-type Entry struct{
-	key string
-	keySize int
-	value []byte
-	valueSize int
-
-}
-
 func Open(path string) (*AnchorDB,error){
 	options := &StorageOptions{ 
 		enableWal: false,
@@ -107,7 +99,8 @@ func createNewLSMStore(path string, enableWal bool) (*LSMStore,error){
 func (l *LSMStore) Put(key string, value []byte) error{
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.memtable.Put(key,value)
+	entry := buildEntry(key,value,false)
+	l.memtable.Put(entry)
 	return nil
 } 
 
@@ -122,6 +115,13 @@ func (l *LSMStore) Get(key string) ([]byte,error){
 } 
 
 func (l *LSMStore) Delete(key string) error{
-	return l.memtable.Delete(key)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	entry := buildEntry(key,nil,true)
+	return l.memtable.Put(entry)
 } 
+
+func (l *LSMStore) RangeScan(start string, end string) []*Entry{
+	return l.memtable.Scan(start,end)
+}
 
