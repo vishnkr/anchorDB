@@ -28,7 +28,7 @@ type Block struct{
 
 const OFFSET_SIZE = 2
 
-func (b *Block) encode() []byte{
+func (b *Block) Encode() []byte{
 	offlen := len(b.offsets)
 	buf := make([]byte, len(b.data))
 	copy(buf, b.data)
@@ -44,7 +44,7 @@ func (b *Block) encode() []byte{
 	return buf
 }
 
-func decode(data []byte) (*Block,error){
+func Decode(data []byte) (*Block,error){
 	entryOffsetsLen := binary.BigEndian.Uint16(data[len(data) - OFFSET_SIZE:])
 	if len(data) < int(OFFSET_SIZE + (OFFSET_SIZE*entryOffsetsLen)){
 		return nil,fmt.Errorf("data is corrupted")

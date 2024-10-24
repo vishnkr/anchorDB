@@ -14,8 +14,8 @@ func TestBlockEncodeDecode(t *testing.T) {
         offsets: []uint16{0, 5, 10},
     }
 
-	encoded := originalBlock.encode()
-	decodedBlock, err := decode(encoded)
+	encoded := originalBlock.Encode()
+	decodedBlock, err := Decode(encoded)
     require.NoError(t, err)
 	require.Equal(t, originalBlock.data, decodedBlock.data)
     require.Equal(t, originalBlock.offsets, decodedBlock.offsets)
@@ -27,8 +27,8 @@ func TestBlockEncodeEmptyBlock(t *testing.T) {
         offsets: []uint16{},
     }
 
-    encoded := emptyBlock.encode()
-    decodedBlock, err := decode(encoded)
+    encoded := emptyBlock.Encode()
+    decodedBlock, err := Decode(encoded)
     require.NoError(t, err)
 
     require.Empty(t, decodedBlock.data)
@@ -37,7 +37,7 @@ func TestBlockEncodeEmptyBlock(t *testing.T) {
 
 func TestBlockDecodeInvalidData(t *testing.T){
 	invalidData := []byte{0x45,0x36,0x02}
-	_, err := decode(invalidData)
+	_, err := Decode(invalidData)
 	require.Error(t,err)
 }
 
@@ -106,8 +106,8 @@ func TestBlockIterator(t *testing.T){
     valid = bb.Add([]byte("banana"),[]byte("value3"))
     
     block := bb.Build()
-    encoded:= block.encode()
-    resBlock,err := decode(encoded)
+    encoded:= block.Encode()
+    resBlock,err := Decode(encoded)
     require.NoError(t,err)
     iter := createAndSeekToFirst(resBlock)
     require.True(t,iter.IsValid())

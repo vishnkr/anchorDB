@@ -77,7 +77,7 @@ Sorted String Table Encoding
 
 type SSTable struct{
 	blockMeta []BlockMeta
-	file FileWrapper
+	fileWrap FileWrapper
 	firstKey []byte
 	lastKey []byte
 }
@@ -113,13 +113,23 @@ func OpenSSTable(id int,f FileWrapper) *SSTable{
 
 	return &SSTable{
 		blockMeta: blockMeta,
-		file: f,
+		fileWrap: f,
 		firstKey: firstKey,
 		lastKey: lastKey,
 	}
 }
 
-func (s *SSTable) readBlock(idx uint32) block.Block{
-	// todo
-	return block.Block{}
+func (s *SSTable) readBlock(idx uint)*block.Block{
+	
+	blockMeta := s.blockMeta[idx]
+	var blockEndOffset uint = 0
+	if idx+1<uint(len(s.blockMeta)){
+		blockEndOffset = uint(s.blockMeta[idx+1].offset)
+	} else { blockEndOffset = uint(blockMeta.offset)}
+	
+	blockLen := blockEndOffset - uint(blockMeta.offset) - META_OFFSET_SIZE
+	blockData := make([]byte,blockLen)
+	s.fileWrap.file.ReadAt(blockData,int64(blockLen))
+	block, _ := block.Decode(blockData)
+	return block
 }
