@@ -66,11 +66,7 @@ func Decode(data []byte) (*Block,error){
 } 
 
 func (b *Block) getFirstKey() ([]byte,error){
-	/*buf := bytes.NewReader(b.data)
-	binary.BigEndian.Uint16(b.data)
-	keyLen := binary.BigEndian.Uint16(b.data)
-	key := make([]byte,keyLen)
-	buf.ReadAt(key,2*OFFSET_SIZE)*/
+
 	buf := bytes.NewReader(b.data)
 	var overlap uint16
 	err := binary.Read(buf, binary.BigEndian, &overlap)
@@ -100,7 +96,7 @@ type BlockIterator struct{
 	firstKey []byte
 }
 
-func newBlockIterator(block *Block) *BlockIterator{
+func NewBlockIterator(block *Block) *BlockIterator{
 	iter := &BlockIterator{
 		block: block,
 		idx: 0,
@@ -109,14 +105,14 @@ func newBlockIterator(block *Block) *BlockIterator{
 	return iter
 }
 
-func createAndSeekToFirst(block *Block) *BlockIterator {
-    iter := newBlockIterator(block)
+func CreateAndSeekToFirst(block *Block) *BlockIterator {
+    iter := NewBlockIterator(block)
     iter.SeekToFirst()
     return iter
 }
 
-func createAndSeekToKey(block *Block, key []byte) *BlockIterator {
-    iter := newBlockIterator(block)
+func CeateAndSeekToKey(block *Block, key []byte) *BlockIterator {
+    iter := NewBlockIterator(block)
     iter.SeekToKey(key)
     return iter
 }

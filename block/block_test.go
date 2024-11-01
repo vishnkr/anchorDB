@@ -109,7 +109,7 @@ func TestBlockIterator(t *testing.T){
     encoded:= block.Encode()
     resBlock,err := Decode(encoded)
     require.NoError(t,err)
-    iter := createAndSeekToFirst(resBlock)
+    iter := CreateAndSeekToFirst(resBlock)
     require.True(t,iter.IsValid())
     require.Equal(t,[]byte("apple"),iter.Key())
     require.Equal(t,[]byte("value1"),iter.Value())

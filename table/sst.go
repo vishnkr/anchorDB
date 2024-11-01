@@ -4,6 +4,7 @@ import (
 	"anchor-db/block"
 	"bytes"
 	"encoding/binary"
+	"sort"
 )
 
 const(
@@ -11,6 +12,8 @@ const(
 	META_BLOCK_COUNT_SIZE = 4
 	META_OFFSET_SIZE = 4
 )
+
+type Key []byte
 
 /*
 Sorted String Table Encoding
@@ -109,8 +112,11 @@ func OpenSSTable(id int,f *FileWrapper) *SSTable{
 	}
 }
 
+func (s *SSTable) getBlockCount() int{
+	return len(s.blockMeta)
+}
+
 func (s *SSTable) readBlock(idx uint)*block.Block{
-	
 	blockMeta := s.blockMeta[idx]
 	var blockEndOffset uint = 0
 	if idx+1<uint(len(s.blockMeta)){
@@ -122,4 +128,70 @@ func (s *SSTable) readBlock(idx uint)*block.Block{
 	s.fileWrap.file.ReadAt(blockData,int64(blockLen))
 	block, _ := block.Decode(blockData)
 	return block
+}
+
+func (s *SSTable) getBlockIdx(key []byte) int{
+	idx:= sort.Search(len(s.blockMeta),func (i int) bool{
+		return bytes.Compare(s.blockMeta[i].firstKey,key) > 0
+	})
+	if idx == 0 {
+		return 0
+	}
+	return idx - 1
+}
+
+type SSTIterator struct{
+	sst *SSTable
+	blockIdx int
+	blockIter *block.BlockIterator
+}
+
+func SeekToKeyBlock(sst *SSTable,key []byte) (*block.BlockIterator,int){
+	blockIdx := sst.getBlockIdx(key)
+	blk := sst.readBlock(uint(blockIdx))
+	blockIter := block.CeateAndSeekToKey(blk,key)
+	if !blockIter.IsValid(){
+		blockIdx+=1
+		if blockIdx<= sst.getBlockCount(){
+			blk = sst.readBlock(uint(blockIdx))
+			blockIter = block.CreateAndSeekToFirst(blk)
+		}
+	}
+	return blockIter,blockIdx
+}
+
+func SeekToFirstBlock(sst *SSTable) (*block.BlockIterator,int){
+	blk := sst.readBlock(0)
+	return block.CreateAndSeekToFirst(blk),0
+}
+
+func (si *SSTIterator) SeekToFirst(){
+	iter, idx := SeekToFirstBlock(si.sst)
+	si.blockIdx = idx
+	si.blockIter = iter
+}
+
+func (si *SSTIterator) SeekToKey(key []byte){
+	iter, idx := SeekToKeyBlock(si.sst,key)
+	si.blockIdx = idx
+	si.blockIter = iter
+}
+
+func CreateAndSeekToKey(sst *SSTable, key []byte) *SSTIterator{
+	blockIter, blockIdx := SeekToKeyBlock(sst,key)
+	return &SSTIterator{
+		sst,
+		blockIdx,
+		blockIter,
+	}
+}
+
+func CreateAndSeekToFirst(sst *SSTable)*SSTIterator{
+	iter, _ := SeekToFirstBlock(sst)
+	return &SSTIterator{
+		sst:sst,
+		blockIdx:0,
+		blockIter: iter,
+	}
+
 }
