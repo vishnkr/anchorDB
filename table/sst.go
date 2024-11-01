@@ -4,8 +4,6 @@ import (
 	"anchor-db/block"
 	"bytes"
 	"encoding/binary"
-	"io"
-	"os"
 )
 
 const(
@@ -14,6 +12,15 @@ const(
 	META_OFFSET_SIZE = 4
 )
 
+/*
+Sorted String Table Encoding
+--------------------------------------------------------------------------------------------
+|           Blocks          |              Meta                   |      Extra             |
+-------------------------------------------------------------------------------------------
+| Block #1 | ... | Block #N | Meta block #1 | ... | Meta block #N | meta block offset(u32) |
+--------------------------------------------------------------------------------------------
+*/
+
 type BlockMeta struct{
 	offset uint32
 	firstKey []byte
@@ -21,7 +28,7 @@ type BlockMeta struct{
 }
 
 
-func calculateEstimatedBlockMetaSize(blockMeta []*BlockMeta) int{
+func calculateEstimatedBlockMetaSize(blockMeta []BlockMeta) int{
 	estSize := META_BLOCK_COUNT_SIZE
 	for _,meta := range blockMeta{
 		estSize += META_OFFSET_SIZE
@@ -30,7 +37,7 @@ func calculateEstimatedBlockMetaSize(blockMeta []*BlockMeta) int{
 	}
 	return estSize
 }
-func encodeBlockMetaData(blockMeta []*BlockMeta)([]byte){
+func encodeBlockMetaData(blockMeta []BlockMeta)([]byte){
 	estimatedSize := calculateEstimatedBlockMetaSize(blockMeta)
 	buf := bytes.NewBuffer(make([]byte, estimatedSize))
 
@@ -65,53 +72,36 @@ func decodeBlockMetaData(data []byte) []BlockMeta{
 	return blockMeta
 }
 
-/*
-Sorted String Table Encoding
---------------------------------------------------------------------------------------------
-|           Blocks          |              Meta                   |      Extra             |
--------------------------------------------------------------------------------------------
-| Block #1 | ... | Block #N | Meta block #1 | ... | Meta block #N | meta block offset(u32) |
---------------------------------------------------------------------------------------------
-
-*/
-
 type SSTable struct{
+	id int
 	blockMeta []BlockMeta
-	fileWrap FileWrapper
+	blockMetaOffset uint32
+	fileWrap *FileWrapper
 	firstKey []byte
 	lastKey []byte
 }
 
-type FileWrapper struct{
-	file *os.File
-}
-
-func (f *FileWrapper) size() int64 {
-	stat,err := f.file.Stat()
-	if err!=nil{
-		//handle err
-	}
-	return stat.Size()
-}
-
-
-func OpenSSTable(id int,f FileWrapper) *SSTable{
-	fSize := f.size()
-	f.file.Seek(META_OFFSET_SIZE,io.SeekEnd)
+func OpenSSTable(id int,f *FileWrapper) *SSTable{
+	
+	/*f.file.Seek(META_OFFSET_SIZE,io.SeekEnd)
 	blockMetaOffsetBytes := make([]byte, META_OFFSET_SIZE)
-	f.file.Read(blockMetaOffsetBytes)
+	f.file.Read(blockMetaOffsetBytes)*/
+	blockMetaOffsetBytes := f.ReadAt(f.size-META_OFFSET_SIZE,META_OFFSET_SIZE)
 	blockMetaOffsetValue := binary.BigEndian.Uint32(blockMetaOffsetBytes)
-	f.file.Seek(int64(blockMetaOffsetValue),io.SeekStart)
-	blockMetaOffsets := make([]byte, fSize-META_OFFSET_SIZE-int64(blockMetaOffsetValue))
-	f.file.Read(blockMetaOffsets)
+
+	metaSize := int(f.size - META_OFFSET_SIZE - int64(blockMetaOffsetValue))
+	blockMetaOffsets := f.ReadAt(int64(blockMetaOffsetValue),metaSize)
+	/*f.file.Seek(int64(blockMetaOffsetValue),io.SeekStart)
+	blockMetaOffsets := make([]byte, f.size-META_OFFSET_SIZE-int64(blockMetaOffsetValue))
+	f.file.Read(blockMetaOffsets)*/
 	
 	blockMeta := decodeBlockMetaData(blockMetaOffsets)
 	firstKey := blockMeta[0].firstKey
 	lastKey := blockMeta[len(blockMeta)-1].lastKey
 	//if err!=nil{ /*handle err*/}
 
-
 	return &SSTable{
+		id: id,
 		blockMeta: blockMeta,
 		fileWrap: f,
 		firstKey: firstKey,

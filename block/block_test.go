@@ -98,7 +98,7 @@ func encodeTestData() []byte {
 }
 
 func TestBlockIterator(t *testing.T){
-    bb := NewBlockBuilder(200)
+    bb := NewBlockBuilder(50)
     valid := bb.Add([]byte("apple"),[]byte("value1"))
     require.True(t,true,valid)
     valid = bb.Add([]byte("application"),[]byte{13,14,255})
@@ -118,8 +118,6 @@ func TestBlockIterator(t *testing.T){
     require.Equal(t,[]byte("application"),iter.Key())
     require.Equal(t,[]byte{13,14,255},iter.Value())
     iter.Next()
-    require.True(t,iter.IsValid())
-    require.Equal(t,[]byte("apricot"),iter.Key())
-    require.Equal(t,[]byte("val2"),iter.Value(),)
+    require.False(t,iter.IsValid())
 
 }

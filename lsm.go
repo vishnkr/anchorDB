@@ -68,7 +68,7 @@ type LSMStore struct{
 	path string
 	l0SSTables []int
 	levels [][]int
-	sstables map[int]table.SSTable
+	sstables map[int]*table.SSTable
 	wg sync.WaitGroup
 	ctx context.Context
 	cancel context.CancelFunc
@@ -89,7 +89,18 @@ func createNewLSMStore(path string, enableWal bool) (*LSMStore,error){
 		return nil,err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	sstables := make(map[int]*table.SSTable)
+	
+	for i:=0;i<=2;i++{
+		fw,err := table.OpenFileWrapper(fmt.Sprintf("%d.sst",i))
+		if err!=nil{
+			fmt.Printf("error opening sstable")
+		}
+		sst := table.OpenSSTable(i,fw)
+		sstables[i] = sst
+	}
 	return &LSMStore{
+		sstables: sstables,
 		memtable:memtable,
 		immutables:make([]*Memtable, 0),
 		ctx: ctx,
