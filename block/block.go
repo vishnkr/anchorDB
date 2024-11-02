@@ -117,9 +117,10 @@ func CeateAndSeekToKey(block *Block, key []byte) *BlockIterator {
     return iter
 }
 
-func (bi *BlockIterator) Next(){
+func (bi *BlockIterator) Next() error{
 	bi.idx++
 	bi.SeekTo(bi.idx)
+	return nil
 }
 
 func (bi *BlockIterator) SeekTo(idx int){

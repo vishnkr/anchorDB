@@ -86,22 +86,13 @@ type SSTable struct{
 
 func OpenSSTable(id int,f *FileWrapper) *SSTable{
 	
-	/*f.file.Seek(META_OFFSET_SIZE,io.SeekEnd)
-	blockMetaOffsetBytes := make([]byte, META_OFFSET_SIZE)
-	f.file.Read(blockMetaOffsetBytes)*/
 	blockMetaOffsetBytes := f.ReadAt(f.size-META_OFFSET_SIZE,META_OFFSET_SIZE)
 	blockMetaOffsetValue := binary.BigEndian.Uint32(blockMetaOffsetBytes)
-
 	metaSize := int(f.size - META_OFFSET_SIZE - int64(blockMetaOffsetValue))
 	blockMetaOffsets := f.ReadAt(int64(blockMetaOffsetValue),metaSize)
-	/*f.file.Seek(int64(blockMetaOffsetValue),io.SeekStart)
-	blockMetaOffsets := make([]byte, f.size-META_OFFSET_SIZE-int64(blockMetaOffsetValue))
-	f.file.Read(blockMetaOffsets)*/
-	
 	blockMeta := decodeBlockMetaData(blockMetaOffsets)
 	firstKey := blockMeta[0].firstKey
 	lastKey := blockMeta[len(blockMeta)-1].lastKey
-	//if err!=nil{ /*handle err*/}
 
 	return &SSTable{
 		id: id,
@@ -194,4 +185,28 @@ func CreateAndSeekToFirst(sst *SSTable)*SSTIterator{
 		blockIter: iter,
 	}
 
+}
+
+func (si *SSTIterator) Next() error{
+	si.blockIter.Next()
+	if !si.blockIter.IsValid(){
+		si.blockIdx += 1
+		if si.blockIdx < si.sst.getBlockCount(){
+			blk := si.sst.readBlock(uint(si.blockIdx))
+			si.blockIter = block.CreateAndSeekToFirst(blk)
+		}
+	}
+	return nil
+}
+
+func (si *SSTIterator) IsValid() bool {
+	return si.blockIter.IsValid()
+}
+
+func (si *SSTIterator) Key() []byte{
+	return si.blockIter.Key()
+}
+
+func (si *SSTIterator) Value() []byte{
+	return si.blockIter.Value()
 }

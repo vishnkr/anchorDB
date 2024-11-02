@@ -1,8 +1,7 @@
-package anchordb
+package table
 
 import (
 	wal "anchor-db/wal"
-	"time"
 
 	"github.com/huandu/skiplist"
 )
@@ -10,6 +9,11 @@ type Memtable struct{
 	skiplist skiplist.SkipList
 	size int64
 	wal *wal.WAL
+}
+
+type MemtableIterator struct{
+	skiplist *skiplist.SkipList
+	curEntry *skiplist.Element
 }
 
 func CreateNewMemTable(id int) *Memtable{
@@ -26,14 +30,6 @@ func CreateNewMemTableWithWal(id int,path string) *Memtable{
 		size: 0,
 		wal: wal.OpenWAL(path),
 	}
-}
-
-
-type Entry struct{
-	key string
-	value []byte 
-	deleted bool
-	timestamp int64
 }
 
 func (m *Memtable) GetSize() int64{
@@ -77,14 +73,20 @@ func (m *Memtable) Scan(start string, end string) []*Entry{
 	return entries
 }
 
-func buildEntry(key string, value []byte, deleted bool) *Entry{
-	entry := Entry{
-		key: key,
-		deleted: deleted,
-		timestamp: time.Now().UnixNano(),
-	}
-	if len(value)>0{
-		entry.value = value
-	}
-	return &entry
+func (m *MemtableIterator) Next() error{
+	element := m.skiplist.Element().Next()
+	m.curEntry = element
+	return nil
+}
+
+func (m *MemtableIterator) Value() []byte{
+	return m.curEntry.Value.(*Entry).Value()
+}
+
+func (m *MemtableIterator) Key() []byte{
+	return m.curEntry.Value.(*Entry).Key()
+}
+
+func (m *MemtableIterator) IsValid() bool{
+	return m.curEntry!=nil
 }
