@@ -9,6 +9,9 @@ type Entry struct{
 	timestamp int64
 }
 
+func (e *Entry) SetKey(key []byte){ e.key = string(key)}
+func (e *Entry) SetValue(value []byte){ e.value = value}
+
 func (e *Entry) Key() []byte{
 	return []byte(e.key)
 }

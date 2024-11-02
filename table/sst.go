@@ -4,6 +4,7 @@ import (
 	"anchor-db/block"
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"sort"
 )
 
@@ -30,6 +31,26 @@ type BlockMeta struct{
 	lastKey []byte
 }
 
+type SSTable struct{
+	id int
+	blockMeta []BlockMeta
+	blockMetaOffset uint32
+	fileWrap *FileWrapper
+	firstKey []byte
+	lastKey []byte
+}
+
+type SSTIterator struct{
+	sst *SSTable
+	blockIdx int
+	blockIter *block.BlockIterator
+}
+
+type LevelIterator struct{
+	levelSSTs []*SSTable
+	sstIter *SSTIterator
+	curIdx int
+}
 
 func calculateEstimatedBlockMetaSize(blockMeta []BlockMeta) int{
 	estSize := META_BLOCK_COUNT_SIZE
@@ -75,15 +96,6 @@ func decodeBlockMetaData(data []byte) []BlockMeta{
 	return blockMeta
 }
 
-type SSTable struct{
-	id int
-	blockMeta []BlockMeta
-	blockMetaOffset uint32
-	fileWrap *FileWrapper
-	firstKey []byte
-	lastKey []byte
-}
-
 func OpenSSTable(id int,f *FileWrapper) *SSTable{
 	
 	blockMetaOffsetBytes := f.ReadAt(f.size-META_OFFSET_SIZE,META_OFFSET_SIZE)
@@ -123,7 +135,7 @@ func (s *SSTable) readBlock(idx uint)*block.Block{
 
 func (s *SSTable) getBlockIdx(key []byte) int{
 	idx:= sort.Search(len(s.blockMeta),func (i int) bool{
-		return bytes.Compare(s.blockMeta[i].firstKey,key) > 0
+		return bytes.Compare(s.blockMeta[i].firstKey,key) <= 0
 	})
 	if idx == 0 {
 		return 0
@@ -131,34 +143,28 @@ func (s *SSTable) getBlockIdx(key []byte) int{
 	return idx - 1
 }
 
-type SSTIterator struct{
-	sst *SSTable
-	blockIdx int
-	blockIter *block.BlockIterator
-}
-
 func SeekToKeyBlock(sst *SSTable,key []byte) (*block.BlockIterator,int){
 	blockIdx := sst.getBlockIdx(key)
 	blk := sst.readBlock(uint(blockIdx))
-	blockIter := block.CeateAndSeekToKey(blk,key)
+	blockIter := block.CreateBlockIterAndSeekToKey(blk,key)
 	if !blockIter.IsValid(){
 		blockIdx+=1
 		if blockIdx<= sst.getBlockCount(){
 			blk = sst.readBlock(uint(blockIdx))
-			blockIter = block.CreateAndSeekToFirst(blk)
+			blockIter = block.CreateBlockIterAndSeekToFirst(blk)
 		}
 	}
 	return blockIter,blockIdx
 }
 
-func SeekToFirstBlock(sst *SSTable) (*block.BlockIterator,int){
+func SeekToFirstBlock(sst *SSTable) *block.BlockIterator{
 	blk := sst.readBlock(0)
-	return block.CreateAndSeekToFirst(blk),0
+	return block.CreateBlockIterAndSeekToFirst(blk)
 }
 
 func (si *SSTIterator) SeekToFirst(){
-	iter, idx := SeekToFirstBlock(si.sst)
-	si.blockIdx = idx
+	iter := SeekToFirstBlock(si.sst)
+	si.blockIdx = 0
 	si.blockIter = iter
 }
 
@@ -168,7 +174,7 @@ func (si *SSTIterator) SeekToKey(key []byte){
 	si.blockIter = iter
 }
 
-func CreateAndSeekToKey(sst *SSTable, key []byte) *SSTIterator{
+func CreateSSTIterAndSeekToKey(sst *SSTable, key []byte) *SSTIterator{
 	blockIter, blockIdx := SeekToKeyBlock(sst,key)
 	return &SSTIterator{
 		sst,
@@ -177,8 +183,8 @@ func CreateAndSeekToKey(sst *SSTable, key []byte) *SSTIterator{
 	}
 }
 
-func CreateAndSeekToFirst(sst *SSTable)*SSTIterator{
-	iter, _ := SeekToFirstBlock(sst)
+func CreateSSTIterAndSeekToFirst(sst *SSTable)*SSTIterator{
+	iter := SeekToFirstBlock(sst)
 	return &SSTIterator{
 		sst:sst,
 		blockIdx:0,
@@ -187,13 +193,14 @@ func CreateAndSeekToFirst(sst *SSTable)*SSTIterator{
 
 }
 
+// StorageIterator interface implementation for SSTIterator
 func (si *SSTIterator) Next() error{
 	si.blockIter.Next()
 	if !si.blockIter.IsValid(){
 		si.blockIdx += 1
 		if si.blockIdx < si.sst.getBlockCount(){
 			blk := si.sst.readBlock(uint(si.blockIdx))
-			si.blockIter = block.CreateAndSeekToFirst(blk)
+			si.blockIter = block.CreateBlockIterAndSeekToFirst(blk)
 		}
 	}
 	return nil
@@ -209,4 +216,87 @@ func (si *SSTIterator) Key() []byte{
 
 func (si *SSTIterator) Value() []byte{
 	return si.blockIter.Value()
+}
+
+func checkLevelVailidity(level []*SSTable){
+	for i,sst := range level{
+		if(bytes.Compare(sst.firstKey,sst.lastKey) <= 0){ 
+			panic(fmt.Sprintf("invalid SST ordering in SSTable at index %d: firstKey (%v) should not be greater than lastKey (%v)", 
+                i, sst.firstKey, sst.lastKey))
+		}
+	}
+	
+	for i:=0;i<len(level)-1;i++{
+		if(bytes.Compare(level[i].lastKey,level[i+1].firstKey) <= 0){ 
+			panic(fmt.Sprintf("invalid SST ordering between SSTable at index %d and SSTable at index %d: lastKey (%v) of first SSTable is greater than firstKey (%v) of second SSTable", 
+                i, i+1, level[i].lastKey, level[i+1].firstKey))
+		}
+	}
+} 
+
+func CreateLevelIterAndSeekToKey(level []*SSTable,key []byte) *LevelIterator{
+	checkLevelVailidity(level)
+	
+	idx := sort.Search(len(level),func (i int) bool{
+		return bytes.Compare(level[i].firstKey,key) <= 0
+	})
+	if(idx>=len(level)){
+		return &LevelIterator{
+			levelSSTs: level,
+			sstIter: nil,
+			curIdx: len(level)-1,
+		}
+	}
+
+	l:= &LevelIterator{
+		levelSSTs: level,
+		sstIter: CreateSSTIterAndSeekToKey(level[idx],key),
+		curIdx: idx,
+	}
+	l.Next()
+	return l
+}
+
+func CreateLevelIterAndSeekToFirst(level []*SSTable) *LevelIterator{
+	checkLevelVailidity(level)
+	if len(level)==0{
+		return &LevelIterator{
+			curIdx: -1,
+			sstIter: nil,
+		}
+	}
+	
+	l:= &LevelIterator{
+		levelSSTs: level,
+		sstIter: CreateSSTIterAndSeekToFirst(level[0]),
+		curIdx: 0,
+	}
+	l.Next()
+	return l
+}
+
+// StorageIterator interface implementation for SSTLevelIterator
+func (l *LevelIterator) Next() error{
+	for l.sstIter!=nil {
+		if l.IsValid(){ break }
+		if l.curIdx+1 >= len(l.levelSSTs){
+			l.sstIter = nil
+		} else {
+			l.curIdx+=1
+			l.sstIter = CreateSSTIterAndSeekToFirst(l.levelSSTs[l.curIdx])
+		}
+	}
+	return nil
+}
+
+func (l *LevelIterator) IsValid() bool{
+	return l.sstIter!=nil && l.sstIter.IsValid()
+}
+
+func (l *LevelIterator) Key() []byte{
+	return l.sstIter.Key()
+}
+
+func (l *LevelIterator) Value() []byte{
+	return l.sstIter.Value()
 }

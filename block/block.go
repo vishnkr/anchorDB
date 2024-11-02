@@ -105,13 +105,13 @@ func NewBlockIterator(block *Block) *BlockIterator{
 	return iter
 }
 
-func CreateAndSeekToFirst(block *Block) *BlockIterator {
+func CreateBlockIterAndSeekToFirst(block *Block) *BlockIterator {
     iter := NewBlockIterator(block)
     iter.SeekToFirst()
     return iter
 }
 
-func CeateAndSeekToKey(block *Block, key []byte) *BlockIterator {
+func CreateBlockIterAndSeekToKey(block *Block, key []byte) *BlockIterator {
     iter := NewBlockIterator(block)
     iter.SeekToKey(key)
     return iter

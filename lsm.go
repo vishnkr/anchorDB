@@ -2,6 +2,7 @@ package anchordb
 
 import (
 	"anchor-db/table"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -9,10 +10,6 @@ import (
 	"sync"
 )
 
-type AnchorDB struct{
-	storage *Storage
-	flushNotifier chan struct{}
-}
 
 type LSMStore struct{
 	memtable *table.Memtable
@@ -39,41 +36,6 @@ type StorageOptions struct{
 	maxMemTableCount uint8
 	blockSize uint
 	targetSstSize uint
-}
-
-func Open(path string) (*AnchorDB,error){
-	options := StorageOptions{ 
-		enableWal: false,
-		maxMemTableCount: 1,
-		blockSize: 4096,
-		targetSstSize: 2 << 20,
-	}
-
-	
-	storage,_ := setupStorage(path,options)
-	return &AnchorDB{ 
-		storage: storage,  
-		flushNotifier: make(chan struct{}),
-	},nil
-}
-
-func (a *AnchorDB) Put(key string,value []byte){
-	err := a.storage.Put(key,value)
-	if err!=nil{
-		fmt.Printf("Error: %s",err.Error())
-	}
-}
-
-func (a *AnchorDB) Get(key string) []byte{
-	value, err := a.storage.Get(key)
-	if err!=nil{
-		fmt.Printf("Error: %s",err.Error())
-	}
-	return value.Value()
-}
-
-func (a *AnchorDB) Delete(key string){
-	a.storage.Delete(key)
 }
 
 func setupStorage(path string,options StorageOptions) (*Storage,error){
@@ -104,7 +66,7 @@ func (s *Storage) Delete(key string) error{
 }
 
 func (s *Storage) Get(key string) (*table.Entry,error){
-	return s.store.Get(key)
+	return s.store.Get([]byte(key))
 }
 
 
@@ -148,14 +110,59 @@ func (l *LSMStore) Put(key string, value []byte) error{
 	return nil
 } 
 
-func (l *LSMStore) Get(key string) (*table.Entry,error){
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	entry, ok := l.memtable.Get(key)
-	if !ok{
-		return nil,fmt.Errorf("key %s does not exist",key)
+func (l *LSMStore) Get(key []byte) (*table.Entry,error){
+	var memtable *table.Memtable
+	var immutable []*table.Memtable
+
+	l.mu.RLock()
+	memtable = l.memtable
+	immutable = l.immutable
+	l.mu.RUnlock()
+
+	if entry, ok := memtable.Get(string(key)); ok {
+		if len(entry.Value()) == 0 {
+			return nil, nil // Tombstone found, key was deleted
+		}
+		return entry,nil
 	}
-	return entry,nil
+	for _, imm := range immutable{
+		if entry, ok := imm.Get(string(key)); ok {
+			if len(entry.Value()) == 0 {
+				return nil, nil
+			}
+			return entry,nil
+		}
+	}
+	var iter *table.SSTIterator
+	sstIters := make([]*table.SSTIterator,len(l.l0SSTables))
+	for _,tableId := range l.l0SSTables{
+		if sst,ok := l.sstables[tableId]; ok{
+			iter = table.CreateSSTIterAndSeekToKey(sst,key)
+			sstIters = append(sstIters, iter)
+		}
+	}
+	level0MergeIter := table.NewMergeIterator(sstIters)
+	levelIters := make([]*table.LevelIterator,len(l.levels))
+	for _, level := range l.levels{
+		levelSSTs := make([]*table.SSTable,len(level))
+		for _,tableId := range level{
+			if sst,ok := l.sstables[tableId];ok{
+				levelSSTs = append(levelSSTs, sst)
+			}
+		}
+		levelIters = append(levelIters, table.CreateLevelIterAndSeekToKey(levelSSTs,key))
+	}
+	twoMergeIter,_ := table.NewTwoMergeIterator(
+		level0MergeIter,
+		table.NewMergeIterator(levelIters),
+	)
+	if twoMergeIter.IsValid() && bytes.Compare(twoMergeIter.Key(),key)==0 && len(twoMergeIter.Value())>0{
+		e:= &table.Entry{}
+		e.SetKey(key)
+		e.SetValue(twoMergeIter.Value())
+		return e,nil
+	}
+	return nil, fmt.Errorf("key %s does not exist", key)
 } 
 
 func (l *LSMStore) Delete(key string) error{
