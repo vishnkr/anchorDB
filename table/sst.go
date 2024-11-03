@@ -218,7 +218,7 @@ func (si *SSTIterator) Value() []byte{
 	return si.blockIter.Value()
 }
 
-func checkLevelVailidity(level []*SSTable){
+func checkLevelValidity(level []*SSTable){
 	for i,sst := range level{
 		if(bytes.Compare(sst.firstKey,sst.lastKey) <= 0){ 
 			panic(fmt.Sprintf("invalid SST ordering in SSTable at index %d: firstKey (%v) should not be greater than lastKey (%v)", 
@@ -235,7 +235,7 @@ func checkLevelVailidity(level []*SSTable){
 } 
 
 func CreateLevelIterAndSeekToKey(level []*SSTable,key []byte) *LevelIterator{
-	checkLevelVailidity(level)
+	checkLevelValidity(level)
 	
 	idx := sort.Search(len(level),func (i int) bool{
 		return bytes.Compare(level[i].firstKey,key) <= 0
@@ -258,7 +258,7 @@ func CreateLevelIterAndSeekToKey(level []*SSTable,key []byte) *LevelIterator{
 }
 
 func CreateLevelIterAndSeekToFirst(level []*SSTable) *LevelIterator{
-	checkLevelVailidity(level)
+	checkLevelValidity(level)
 	if len(level)==0{
 		return &LevelIterator{
 			curIdx: -1,

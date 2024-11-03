@@ -9,6 +9,7 @@ type Memtable struct{
 	skiplist skiplist.SkipList
 	size int64
 	wal *wal.WAL
+	id int
 }
 
 type MemtableIterator struct{
@@ -20,6 +21,7 @@ func CreateNewMemTable(id int) *Memtable{
 	return &Memtable{
 		skiplist: *skiplist.New(skiplist.String),
 		size: 0,
+		id: id,
 	}
 }
 
@@ -29,11 +31,16 @@ func CreateNewMemTableWithWal(id int,path string) *Memtable{
 		skiplist: *skiplist.New(skiplist.String),
 		size: 0,
 		wal: wal.OpenWAL(path),
+		id: id,
 	}
 }
 
 func (m *Memtable) GetSize() int64{
 	return m.size
+}
+
+func (m *Memtable) GetID()int {
+	return m.id
 }
 
 func (m *Memtable) Put(entry *Entry) error{
@@ -71,6 +78,17 @@ func (m *Memtable) Scan(start string, end string) []*Entry{
 		i = i.Next()
 	}
 	return entries
+}
+
+func (m *Memtable) Flush(s *SSTBuilder) {
+	var k,v []byte
+	elem := m.skiplist.Front()
+	for elem!=nil{
+		k=elem.Value.(*Entry).Key()
+		v=elem.Value.(*Entry).Value()
+		s.Add(k,v)
+		elem= elem.Next()
+	}
 }
 
 func (m *MemtableIterator) Next() error{

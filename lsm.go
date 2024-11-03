@@ -28,6 +28,8 @@ type Storage struct {
 	store *LSMStore
 	options StorageOptions
 	nextId int
+	storeLock sync.Mutex
+	path string
 }
 
 type StorageOptions struct{
@@ -51,9 +53,10 @@ func setupStorage(path string,options StorageOptions) (*Storage,error){
 	}
 	nextId := 0
 	return &Storage{
-		store,
-		options,
-		nextId,
+		store:store,
+		options:options,
+		nextId:nextId,
+		path: path,
 	},nil
 }
 
@@ -134,14 +137,14 @@ func (l *LSMStore) Get(key []byte) (*table.Entry,error){
 		}
 	}
 	var iter *table.SSTIterator
-	sstIters := make([]*table.SSTIterator,len(l.l0SSTables))
+	l0Iters := make([]*table.SSTIterator,len(l.l0SSTables))
 	for _,tableId := range l.l0SSTables{
 		if sst,ok := l.sstables[tableId]; ok{
 			iter = table.CreateSSTIterAndSeekToKey(sst,key)
-			sstIters = append(sstIters, iter)
+			l0Iters = append(l0Iters, iter)
 		}
 	}
-	level0MergeIter := table.NewMergeIterator(sstIters)
+
 	levelIters := make([]*table.LevelIterator,len(l.levels))
 	for _, level := range l.levels{
 		levelSSTs := make([]*table.SSTable,len(level))
@@ -153,7 +156,7 @@ func (l *LSMStore) Get(key []byte) (*table.Entry,error){
 		levelIters = append(levelIters, table.CreateLevelIterAndSeekToKey(levelSSTs,key))
 	}
 	twoMergeIter,_ := table.NewTwoMergeIterator(
-		level0MergeIter,
+		table.NewMergeIterator(l0Iters),
 		table.NewMergeIterator(levelIters),
 	)
 	if twoMergeIter.IsValid() && bytes.Compare(twoMergeIter.Key(),key)==0 && len(twoMergeIter.Value())>0{
@@ -179,7 +182,37 @@ func (l *LSMStore) RangeScan(start string, end string) []*table.Entry{
 func (s *Storage) attemptFreeze(estSize uint){
 	if (estSize >= s.options.targetSstSize){
 		if s.store.memtable.GetSize() >= s.options.maxMemTableSize{
-
+			//TODO
 		}
 	}
+}
+
+func (s *Storage) flushLastImmutableMemTable() error{
+	s.storeLock.Lock()
+	defer s.storeLock.Unlock()
+
+	var flushMemtable *table.Memtable
+	s.store.mu.RLock()
+	immCount := len(s.store.immutable)
+	if(immCount==0){
+		s.store.mu.RUnlock()
+        return fmt.Errorf("no imm memtables to flush")
+	}
+	flushMemtable = s.store.immutable[immCount-1]
+	s.store.mu.RUnlock()
+	sstBuilder := table.NewSSTBuilder(int(s.options.blockSize))
+	flushMemtable.Flush(sstBuilder)
+	sstPath := filepath.Join(s.path,fmt.Sprintf("%d.sst",flushMemtable.GetID()))
+	sst := sstBuilder.Build(
+		flushMemtable.GetID(),
+		sstPath,
+	)
+	s.store.mu.Lock()
+	defer s.store.mu.Unlock()
+	
+	s.store.immutable = s.store.immutable[:immCount-1]
+	s.store.l0SSTables = append([]int{flushMemtable.GetID()},s.store.l0SSTables...)
+	s.store.sstables[flushMemtable.GetID()]=sst
+	syncDir(s.path)
+	return nil
 }
