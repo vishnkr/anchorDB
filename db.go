@@ -4,7 +4,6 @@ import "fmt"
 
 type AnchorDB struct{
 	storage *Storage
-	flushNotifier chan struct{}
 }
 
 func Open(path string) (*AnchorDB,error){
@@ -19,7 +18,6 @@ func Open(path string) (*AnchorDB,error){
 	storage,_ := setupStorage(path,options)
 	return &AnchorDB{ 
 		storage: storage,  
-		flushNotifier: make(chan struct{}),
 	},nil
 }
 
@@ -34,6 +32,7 @@ func (a *AnchorDB) Get(key string) []byte{
 	value, err := a.storage.Get(key)
 	if err!=nil{
 		fmt.Printf("Error: %s",err.Error())
+		return nil
 	}
 	return value.Value()
 }

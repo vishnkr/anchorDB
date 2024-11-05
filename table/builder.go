@@ -1,7 +1,7 @@
 package table
 
 import (
-	"anchor-db/block"
+	"anchordb/block"
 	"hash/crc32"
 )
 

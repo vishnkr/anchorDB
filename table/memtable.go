@@ -1,7 +1,7 @@
 package table
 
 import (
-	wal "anchor-db/wal"
+	wal "anchordb/wal"
 
 	"github.com/huandu/skiplist"
 )

@@ -1,13 +1,14 @@
 package anchordb
 
 import (
-	"anchor-db/table"
+	"anchordb/table"
 	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 
@@ -19,7 +20,6 @@ type LSMStore struct{
 	l0SSTables []int
 	levels [][]int
 	sstables map[int]*table.SSTable
-	wg sync.WaitGroup
 	ctx context.Context
 	cancel context.CancelFunc
 }
@@ -30,12 +30,14 @@ type Storage struct {
 	nextId int
 	storeLock sync.Mutex
 	path string
+	flushNotifier chan struct{}
+	flushStop chan struct{}
 }
 
 type StorageOptions struct{
 	enableWal bool
 	maxMemTableSize int64
-	maxMemTableCount uint8
+	maxMemTableCount int
 	blockSize uint
 	targetSstSize uint
 }
@@ -52,12 +54,16 @@ func setupStorage(path string,options StorageOptions) (*Storage,error){
 		return nil,err
 	}
 	nextId := 0
-	return &Storage{
+	storage:= &Storage{
 		store:store,
 		options:options,
 		nextId:nextId,
 		path: path,
-	},nil
+		flushNotifier: make(chan struct{}, 1), // Buffered to avoid blocking
+		flushStop:    make(chan struct{}),
+	}
+	storage.spawnFlushTrigger()
+	return storage,nil
 }
 
 func (s *Storage) Put(key string, value []byte) error{
@@ -69,7 +75,11 @@ func (s *Storage) Delete(key string) error{
 }
 
 func (s *Storage) Get(key string) (*table.Entry,error){
-	return s.store.Get([]byte(key))
+	result,err := s.store.Get([]byte(key))
+	if err!=nil{
+		return nil,err
+	}
+	return result,nil
 }
 
 
@@ -91,7 +101,8 @@ func createNewLSMStore(path string, enableWal bool) (*LSMStore,error){
 	for i:=0;i<=2;i++{
 		fw,err := table.OpenFileWrapper(fmt.Sprintf("%d.sst",i))
 		if err!=nil{
-			fmt.Printf("error opening sstable")
+			//fmt.Printf("error opening sstable")
+			continue
 		}
 		sst := table.OpenSSTable(i,fw)
 		sstables[i] = sst
@@ -165,7 +176,7 @@ func (l *LSMStore) Get(key []byte) (*table.Entry,error){
 		e.SetValue(twoMergeIter.Value())
 		return e,nil
 	}
-	return nil, fmt.Errorf("key %s does not exist", key)
+	return nil, fmt.Errorf("key %s does not exist\n", key)
 } 
 
 func (l *LSMStore) Delete(key string) error{
@@ -196,7 +207,7 @@ func (s *Storage) flushLastImmutableMemTable() error{
 	immCount := len(s.store.immutable)
 	if(immCount==0){
 		s.store.mu.RUnlock()
-        return fmt.Errorf("no imm memtables to flush")
+        return nil
 	}
 	flushMemtable = s.store.immutable[immCount-1]
 	s.store.mu.RUnlock()
@@ -215,4 +226,41 @@ func (s *Storage) flushLastImmutableMemTable() error{
 	s.store.sstables[flushMemtable.GetID()]=sst
 	syncDir(s.path)
 	return nil
+}
+
+func (s *Storage) spawnFlushTrigger(){
+	go func ()  {
+		ticker := time.NewTicker(100*time.Millisecond)
+		defer ticker.Stop()
+		
+		for {
+			select {
+			case <- ticker.C:
+				s.shouldTriggerFlush()
+			case <-s.flushNotifier:
+				if err:=s.flushLastImmutableMemTable();err!=nil{
+					fmt.Println("Flush failed:", err)
+				}	
+			case <-s.flushStop:
+				fmt.Println("Stopping flush trigger")
+				return
+			}
+		}
+
+	}()
+}
+
+func (s *Storage) shouldTriggerFlush(){
+	s.store.mu.RLock()
+	defer s.store.mu.RUnlock()
+	if(len(s.store.immutable)+1 >= s.options.maxMemTableCount){
+		select {
+		case s.flushNotifier <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (s *Storage) stopFlushTrigger(){
+	close(s.flushStop)
 }
