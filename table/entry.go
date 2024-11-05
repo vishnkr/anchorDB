@@ -20,10 +20,10 @@ func (e *Entry) Value() []byte{
 	return []byte(e.value)
 }
 
-func BuildEntry(key string, value []byte, deleted bool) *Entry{
+func BuildEntry(key string, value []byte) *Entry{
 	entry := Entry{
 		key: key,
-		deleted: deleted,
+		deleted: value==nil,
 		timestamp: time.Now().UnixNano(),
 	}
 	if len(value)>0{

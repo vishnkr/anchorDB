@@ -4,6 +4,7 @@ import (
 	"anchordb/table"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,7 +44,7 @@ type StorageOptions struct{
 }
 
 func setupStorage(path string,options StorageOptions) (*Storage,error){
-	dbPath := filepath.Join(path,"db_root")
+	dbPath := filepath.Join(path)
 
 	store,err := createNewLSMStore(dbPath,options.enableWal)
 	if err!=nil{
@@ -53,7 +54,7 @@ func setupStorage(path string,options StorageOptions) (*Storage,error){
 	if err := os.MkdirAll(dbPath,os.ModePerm); err!=nil{
 		return nil,err
 	}
-	nextId := 0
+	nextId := 1
 	storage:= &Storage{
 		store:store,
 		options:options,
@@ -67,7 +68,19 @@ func setupStorage(path string,options StorageOptions) (*Storage,error){
 }
 
 func (s *Storage) Put(key string, value []byte) error{
-	return s.store.Put(key,value)
+	if key == "" {
+		return errors.New("key cannot be empty")
+	}
+	if len(value) == 0 {
+		return errors.New("value cannot be empty")
+	}
+
+	err := s.store.Put(key, value)
+	if err != nil {
+		return err
+	}
+	s.attemptFreeze()
+	return nil
 }
 
 func (s *Storage) Delete(key string) error{
@@ -119,7 +132,7 @@ func createNewLSMStore(path string, enableWal bool) (*LSMStore,error){
 func (l *LSMStore) Put(key string, value []byte) error{
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	entry := table.BuildEntry(key,value,false)
+	entry := table.BuildEntry(key,value)
 	l.memtable.Put(entry)
 	return nil
 } 
@@ -182,7 +195,7 @@ func (l *LSMStore) Get(key []byte) (*table.Entry,error){
 func (l *LSMStore) Delete(key string) error{
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	entry := table.BuildEntry(key,nil,true)
+	entry := table.BuildEntry(key,nil)
 	return l.memtable.Put(entry)
 } 
 
@@ -190,14 +203,26 @@ func (l *LSMStore) RangeScan(start string, end string) []*table.Entry{
 	return l.memtable.Scan(start,end)
 }
 
-func (s *Storage) attemptFreeze(estSize uint){
-	if (estSize >= s.options.targetSstSize){
-		if s.store.memtable.GetSize() >= s.options.maxMemTableSize{
-			//TODO
-		}
+func (s *Storage) attemptFreeze(){
+	currentSize := s.store.memtable.GetSize()
+	if currentSize >= int64(s.options.targetSstSize){
+		s.storeLock.Lock()
+		defer s.storeLock.Unlock()
+		memtableID := s.nextId
+		s.nextId++  
+		s.store.freezeAndReplaceMemtable(memtableID)
 	}
+	return
 }
 
+func (l *LSMStore) freezeAndReplaceMemtable(id int){
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	newMemtable := table.CreateNewMemTable(id)
+	oldMemtable := l.memtable
+	l.immutable = append([]*table.Memtable{oldMemtable},l.immutable...)
+	l.memtable = newMemtable
+}
 func (s *Storage) flushLastImmutableMemTable() error{
 	s.storeLock.Lock()
 	defer s.storeLock.Unlock()

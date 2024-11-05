@@ -9,9 +9,9 @@ type AnchorDB struct{
 func Open(path string) (*AnchorDB,error){
 	options := StorageOptions{ 
 		enableWal: false,
-		maxMemTableCount: 1,
-		blockSize: 4096,
-		targetSstSize: 2 << 20,
+		maxMemTableCount: 3,
+		blockSize: 32,
+		targetSstSize: 2 << 5,
 	}
 
 	
