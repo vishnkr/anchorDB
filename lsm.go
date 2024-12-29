@@ -45,15 +45,14 @@ type StorageOptions struct{
 
 func setupStorage(path string,options StorageOptions) (*Storage,error){
 	dbPath := filepath.Join(path)
-
+	if err := os.MkdirAll(dbPath,os.ModePerm); err!=nil{
+		return nil,err
+	}
 	store,err := createNewLSMStore(dbPath,options.enableWal)
 	if err!=nil{
 		return nil,err
 	}
 
-	if err := os.MkdirAll(dbPath,os.ModePerm); err!=nil{
-		return nil,err
-	}
 	nextId := 1
 	storage:= &Storage{
 		store:store,
@@ -74,12 +73,12 @@ func (s *Storage) Put(key string, value []byte) error{
 	if len(value) == 0 {
 		return errors.New("value cannot be empty")
 	}
-
+	s.attemptFreeze()
 	err := s.store.Put(key, value)
 	if err != nil {
 		return err
 	}
-	s.attemptFreeze()
+	
 	return nil
 }
 
@@ -103,11 +102,7 @@ func createNewLSMStore(path string, enableWal bool) (*LSMStore,error){
 	} else {
 		memtable = table.CreateNewMemTable(0)
 	}
-	fp := filepath.Join(path)
-	err := os.MkdirAll(fp,os.ModePerm)
-	if err!=nil{
-		return nil,err
-	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	sstables := make(map[int]*table.SSTable)
 	
@@ -164,8 +159,12 @@ func (l *LSMStore) Get(key []byte) (*table.Entry,error){
 	l0Iters := make([]*table.SSTIterator,len(l.l0SSTables))
 	for _,tableId := range l.l0SSTables{
 		if sst,ok := l.sstables[tableId]; ok{
-			iter = table.CreateSSTIterAndSeekToKey(sst,key)
-			l0Iters = append(l0Iters, iter)
+			if (bytes.Compare(key, sst.GetFirstKey()) >= 0 && bytes.Compare(key, sst.GetLastKey()) <= 0) || 
+			(bytes.Compare(sst.GetFirstKey(), sst.GetLastKey()) > 0 && 
+				(bytes.Compare(key, sst.GetFirstKey()) >= 0 || bytes.Compare(key, sst.GetLastKey()) <= 0)) {
+				iter = table.CreateSSTIterAndSeekToKey(sst, key)
+				l0Iters = append(l0Iters, iter)
+			}
 		}
 	}
 
@@ -212,7 +211,6 @@ func (s *Storage) attemptFreeze(){
 		s.nextId++  
 		s.store.freezeAndReplaceMemtable(memtableID)
 	}
-	return
 }
 
 func (l *LSMStore) freezeAndReplaceMemtable(id int){

@@ -52,6 +52,14 @@ type LevelIterator struct{
 	curIdx int
 }
 
+func (s *SSTable) GetFirstKey()[]byte{
+	return s.firstKey
+}
+
+func (s *SSTable) GetLastKey()[]byte{
+	return s.lastKey
+}
+
 func calculateEstimatedBlockMetaSize(blockMeta []BlockMeta) int{
 	estSize := META_BLOCK_COUNT_SIZE
 	for _,meta := range blockMeta{
@@ -125,17 +133,24 @@ func (s *SSTable) readBlock(idx uint)*block.Block{
 	if idx+1<uint(len(s.blockMeta)){
 		blockEndOffset = uint(s.blockMeta[idx+1].offset)
 	} else { blockEndOffset = uint(blockMeta.offset)}
+	fmt.Printf("BLCK ENDOFF IS %d, METAOFF IS %d,\n",blockEndOffset,blockMeta.offset)
 	
-	blockLen := blockEndOffset - uint(blockMeta.offset) - META_OFFSET_SIZE
+	blockLen := int(blockEndOffset) - int(blockMeta.offset) - int(META_OFFSET_SIZE)
+	fmt.Printf("BLEN IS %d\n",blockLen)
+	if blockLen < 0 {
+		fmt.Println("Negative block length, skipping read")
+		return nil
+	}
 	blockData := make([]byte,blockLen)
-	s.fileWrap.file.ReadAt(blockData,int64(blockLen))
+	
+	s.fileWrap.file.ReadAt(blockData,int64(blockMeta.offset))
 	block, _ := block.Decode(blockData)
 	return block
 }
 
 func (s *SSTable) getBlockIdx(key []byte) int{
 	idx:= sort.Search(len(s.blockMeta),func (i int) bool{
-		return bytes.Compare(s.blockMeta[i].firstKey,key) <= 0
+		return bytes.Compare(s.blockMeta[i].firstKey,key) > 0
 	})
 	if idx == 0 {
 		return 0

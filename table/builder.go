@@ -2,6 +2,7 @@ package table
 
 import (
 	"anchordb/block"
+	"fmt"
 	"hash/crc32"
 )
 
@@ -52,7 +53,10 @@ func (b *SSTBuilder) Build(tableId int,path string) *SSTable{
 	encoded := encodeBlockMetaData(b.blockMeta)
 	buf = append(buf, encoded...)
 	buf = append(buf, byte(metaOff))
-	fileWrap,_ := CreateFileWrapper(path,buf)
+	fileWrap,err := CreateFileWrapper(path,buf)
+	if err!=nil{
+		fmt.Printf("err : %s",err.Error())
+	}
 	firstKey := b.blockMeta[0].firstKey
 	lastKey := b.blockMeta[len(b.blockMeta)-1].lastKey
 	return &SSTable{

@@ -45,12 +45,8 @@ func (b *Block) Encode() []byte{
 }
 
 func Decode(data []byte) (*Block,error){
-	entryOffsetsLen := binary.BigEndian.Uint16(data[len(data) - OFFSET_SIZE:])
-	if len(data) < int(OFFSET_SIZE + (OFFSET_SIZE*entryOffsetsLen)){
-		return nil,fmt.Errorf("data is corrupted")
-	}
-
-	offsetStart := len(data) - int(OFFSET_SIZE + (OFFSET_SIZE*entryOffsetsLen))
+	offsetCount := binary.BigEndian.Uint16(data[len(data) - OFFSET_SIZE:])
+	offsetStart := len(data) - int(OFFSET_SIZE + (OFFSET_SIZE*offsetCount))
 	offsetData := data[offsetStart:len(data)-OFFSET_SIZE]
 	var offsets []uint16
 	for i:=0;i<len(offsetData);i+=OFFSET_SIZE{
