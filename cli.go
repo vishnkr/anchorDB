@@ -43,8 +43,9 @@ var getCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
-		value := db.Get(key)
-		if value == nil {
+		value,err := db.Get(key)
+		if err != nil {
+			fmt.Printf("Key %s does not exist\n",key)
 		} else {
 			fmt.Printf("Retrieved key=%s, value=%s\n", key, value)
 		}

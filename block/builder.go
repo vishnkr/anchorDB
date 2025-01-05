@@ -9,6 +9,10 @@ type BlockBuilder struct{
 	firstKey []byte
 }
 
+func (b *BlockBuilder) FirstKey() []byte{
+	return b.firstKey
+}
+
 func NewBlockBuilder(size int) *BlockBuilder{
 	return &BlockBuilder{
 		offsets: make([]uint16, 0),
@@ -20,8 +24,9 @@ func NewBlockBuilder(size int) *BlockBuilder{
 
 
 func (b *BlockBuilder) estimatedSize() int{
-	// key value pair count in this block + offsets + data
+	// size of offsets start pos u16
 	return OFFSET_SIZE +
+	// offsets for each entry
 	len(b.offsets) * OFFSET_SIZE +
 	len(b.data)
 }
@@ -45,7 +50,7 @@ func appendU16(data []byte, value uint16) []byte {
 }
 
 
-func (b *BlockBuilder) Add(key []byte,value []byte) bool{
+func (b *BlockBuilder) oldAdd(key []byte,value []byte) bool{
 	if(len(key)==0){ return false}
 	if b.estimatedSize() + len(key) + len(value) + 3*OFFSET_SIZE > b.blockSize && !b.isEmpty(){
 		return false
@@ -74,4 +79,54 @@ func (b *BlockBuilder) Build() Block{
 		data: b.data,
 		offsets: b.offsets,
 	}
+}
+
+func encodeVarint(x uint64) []byte{
+	var buf []byte
+    for x >= 0x80 {
+        buf = append(buf, byte(x|0x80))
+        x >>= 7
+    }
+    buf = append(buf, byte(x))
+    return buf
+}
+
+func decodeVarint(data []byte) (uint64, int) {
+    var x uint64
+    var shift uint
+    for i, b := range data {
+        x |= uint64(b&0x7F) << shift
+        if b&0x80 == 0 {
+            return x, i + 1
+        }
+        shift += 7
+    }
+    panic("varint decoding failed")
+}
+
+func (b *BlockBuilder) Add(key []byte,value []byte) bool{
+	if len(key)==0{
+		return false
+	}
+
+	keyLenBytes := encodeVarint(uint64(len(key)))
+	valueLenBytes := encodeVarint(uint64(len(value)))
+	estimatedSize := b.estimatedSize() + len(key) + len(keyLenBytes) + len(value) + len(valueLenBytes) + OFFSET_SIZE
+	if  estimatedSize > b.blockSize && !b.isEmpty(){
+		return false
+	}
+	// max 64KB Block size for now
+	b.offsets = append(b.offsets, uint16(len(b.data)))
+	
+	b.data = append(b.data, keyLenBytes...)
+	b.data = append(b.data, key...)
+
+	b.data = append(b.data, valueLenBytes...)
+	b.data = append(b.data, value...)
+
+	if len(b.firstKey) == 0 {
+        b.firstKey = make([]byte, len(key))
+        copy(b.firstKey, key)
+    }
+	return true
 }

@@ -9,9 +9,9 @@ type AnchorDB struct{
 func Open(path string) (*AnchorDB,error){
 	options := StorageOptions{ 
 		enableWal: false,
-		maxMemTableCount: 2,
-		blockSize: 32,
-		targetSstSize: 2 << 5,
+		maxMemTableCount: 4,
+		blockSize: 4000,
+		targetSstSize: 4194304,
 	}
 
 	
@@ -28,13 +28,12 @@ func (a *AnchorDB) Put(key string,value []byte){
 	}
 }
 
-func (a *AnchorDB) Get(key string) []byte{
+func (a *AnchorDB) Get(key string) ([]byte,error){
 	value, err := a.storage.Get(key)
 	if err!=nil{
-		fmt.Printf("Error: %s",err.Error())
-		return nil
+		return nil,err
 	}
-	return value.Value()
+	return value.Value(),nil
 }
 
 func (a *AnchorDB) Delete(key string){

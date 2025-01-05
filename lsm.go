@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,6 +24,7 @@ type LSMStore struct{
 	sstables map[int]*table.SSTable
 	ctx context.Context
 	cancel context.CancelFunc
+	seqCounter uint64
 }
 
 type Storage struct {
@@ -124,31 +126,39 @@ func createNewLSMStore(path string, enableWal bool) (*LSMStore,error){
 	},nil
 }
 
+
+func (l *LSMStore) nextSeq() uint64 {
+	return atomic.AddUint64(&l.seqCounter, 1)
+}
+
 func (l *LSMStore) Put(key string, value []byte) error{
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	entry := table.BuildEntry(key,value)
+	seq := l.nextSeq()
+	entry := table.BuildEntryWithSeqNo([]byte(key),value,seq)
 	l.memtable.Put(entry)
 	return nil
 } 
 
 func (l *LSMStore) Get(key []byte) (*table.Entry,error){
+	
 	var memtable *table.Memtable
 	var immutable []*table.Memtable
 
 	l.mu.RLock()
+	defer l.mu.RUnlock()
 	memtable = l.memtable
 	immutable = l.immutable
-	l.mu.RUnlock()
+	
 
-	if entry, ok := memtable.Get(string(key)); ok {
+	if entry, ok := memtable.Get(key); ok {
 		if len(entry.Value()) == 0 {
 			return nil, nil // Tombstone found, key was deleted
 		}
 		return entry,nil
 	}
 	for _, imm := range immutable{
-		if entry, ok := imm.Get(string(key)); ok {
+		if entry, ok := imm.Get(key); ok {
 			if len(entry.Value()) == 0 {
 				return nil, nil
 			}
@@ -156,21 +166,19 @@ func (l *LSMStore) Get(key []byte) (*table.Entry,error){
 		}
 	}
 	var iter *table.SSTIterator
-	l0Iters := make([]*table.SSTIterator,len(l.l0SSTables))
+	l0Iters := make([]*table.SSTIterator, 0, len(l.l0SSTables))
 	for _,tableId := range l.l0SSTables{
 		if sst,ok := l.sstables[tableId]; ok{
-			if (bytes.Compare(key, sst.GetFirstKey()) >= 0 && bytes.Compare(key, sst.GetLastKey()) <= 0) || 
-			(bytes.Compare(sst.GetFirstKey(), sst.GetLastKey()) > 0 && 
-				(bytes.Compare(key, sst.GetFirstKey()) >= 0 || bytes.Compare(key, sst.GetLastKey()) <= 0)) {
+			if bytes.Compare(key, sst.GetFirstKey()) >= 0 {
 				iter = table.CreateSSTIterAndSeekToKey(sst, key)
 				l0Iters = append(l0Iters, iter)
 			}
 		}
 	}
 
-	levelIters := make([]*table.LevelIterator,len(l.levels))
+	levelIters := make([]*table.LevelIterator,0,len(l.levels))
 	for _, level := range l.levels{
-		levelSSTs := make([]*table.SSTable,len(level))
+		levelSSTs := make([]*table.SSTable,0,len(level))
 		for _,tableId := range level{
 			if sst,ok := l.sstables[tableId];ok{
 				levelSSTs = append(levelSSTs, sst)
@@ -182,24 +190,26 @@ func (l *LSMStore) Get(key []byte) (*table.Entry,error){
 		table.NewMergeIterator(l0Iters),
 		table.NewMergeIterator(levelIters),
 	)
-	if twoMergeIter.IsValid() && bytes.Compare(twoMergeIter.Key(),key)==0 && len(twoMergeIter.Value())>0{
-		e:= &table.Entry{}
+	if twoMergeIter.IsValid() && bytes.Equal(twoMergeIter.Key(),key) && len(twoMergeIter.Value())>0{
+		e:= table.BuildEntry(key,twoMergeIter.Value()) 
+		/*&table.Entry{}
 		e.SetKey(key)
-		e.SetValue(twoMergeIter.Value())
+		e.SetValue(twoMergeIter.Value())*/
 		return e,nil
 	}
-	return nil, fmt.Errorf("key %s does not exist\n", key)
+	return nil, fmt.Errorf("key %s does not exist", key)
 } 
 
 func (l *LSMStore) Delete(key string) error{
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	entry := table.BuildEntry(key,nil)
+	seq := l.nextSeq()
+	entry := table.BuildEntryWithSeqNo([]byte(key),nil,seq)
 	return l.memtable.Put(entry)
 } 
 
 func (l *LSMStore) RangeScan(start string, end string) []*table.Entry{
-	return l.memtable.Scan(start,end)
+	return l.memtable.Scan([]byte(start),[]byte(end))
 }
 
 func (s *Storage) attemptFreeze(){
@@ -221,6 +231,7 @@ func (l *LSMStore) freezeAndReplaceMemtable(id int){
 	l.immutable = append([]*table.Memtable{oldMemtable},l.immutable...)
 	l.memtable = newMemtable
 }
+
 func (s *Storage) flushLastImmutableMemTable() error{
 	s.storeLock.Lock()
 	defer s.storeLock.Unlock()

@@ -125,14 +125,14 @@ func (t *TwoMergeIterator) skipI1() error{
 
 func (t *TwoMergeIterator) Key() []byte{
 	if t.iFlag{
-		return t.i1.Key()
+		return t.i0.Key()
 	}
-	return t.i0.Key()
+	return t.i1.Key()
 }
 
 func (t *TwoMergeIterator) Value() []byte{
 	if t.iFlag{
-		return t.i1.Value()
+		return t.i0.Value()
 	}
 	return t.i0.Value()
 }

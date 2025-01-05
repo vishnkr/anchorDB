@@ -63,25 +63,18 @@ func Decode(data []byte) (*Block,error){
 
 func (b *Block) getFirstKey() ([]byte,error){
 
-	buf := bytes.NewReader(b.data)
-	var overlap uint16
-	err := binary.Read(buf, binary.BigEndian, &overlap)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read first 2 bytes: %w", err)
-	}
-	var keyLen uint16
-	err = binary.Read(buf, binary.BigEndian, &keyLen)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read key length: %w", err)
-	}
+	keyLen, n := decodeVarint(b.data)
+	if n == 0 {
+        return nil, fmt.Errorf("failed to decode key length")
+    }
+	buf := bytes.NewReader(b.data[n:])
 	key := make([]byte, keyLen)
-	_, err = buf.Read(key)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read key: %w", err)
-	}
-	
+    _, err := buf.Read(key)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read key: %w", err)
+    }
 
-	return key,nil
+    return key, nil
 }
 
 type BlockIterator struct{
@@ -132,20 +125,32 @@ func (bi *BlockIterator) SeekTo(idx int){
 
 func (bi *BlockIterator) SeekToOffset(offset int){
 	buf := bytes.NewReader(bi.block.data[offset:])
-	overlapLen := binary.BigEndian.Uint16(bi.block.data[offset:])
-    offset += OFFSET_SIZE
-    keyLen := binary.BigEndian.Uint16(bi.block.data[offset:])
-    offset += OFFSET_SIZE
+	keyLen, n := decodeVarint(bi.block.data[offset:])
+	if n == 0 {
+		bi.key = nil
+		bi.valueRange = [2]int{0, 0}
+		return
+	}
+	offset += n
 
-	key := make([]byte,keyLen)
-	buf.ReadAt(key,2*OFFSET_SIZE)
-	bi.key = append(bi.firstKey[:overlapLen],key...)
-
-	offset += len(key)
-
-	valueLen := binary.BigEndian.Uint16(bi.block.data[offset:])
-	offset+=OFFSET_SIZE
-	bi.valueRange = [2]int{offset,offset+int(valueLen)}
+	key := make([]byte, keyLen)
+	_, err := buf.ReadAt(key, int64(n))
+	if err != nil {
+		bi.key = nil
+		bi.valueRange = [2]int{0, 0}
+		return
+	}
+	bi.key = key
+	offset += int(keyLen)
+	valueLen, n := decodeVarint(bi.block.data[offset:])
+	if n == 0 {
+		bi.key = nil
+		bi.valueRange = [2]int{0, 0}
+		return
+	}
+	offset += n
+	bi.valueRange = [2]int{offset, offset + int(valueLen)}
+	offset += int(valueLen)
 }
 
 func (bi *BlockIterator) SeekToFirst() {
@@ -157,7 +162,7 @@ func (bi *BlockIterator) IsValid() bool{
 }
 
 func (bi *BlockIterator) SeekToKey(key []byte){
-	low, high:= 0, len(bi.block.offsets)
+	low, high:= 0, len(bi.block.offsets)-1
 	for low < high{
 		mid := (low + (high-low))/2
 		bi.SeekTo(mid)

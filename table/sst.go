@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"sort"
 )
 
@@ -12,6 +13,7 @@ const(
 	BLOCK_OFFSET_SIZE = block.OFFSET_SIZE
 	META_BLOCK_COUNT_SIZE = 4
 	META_OFFSET_SIZE = 4
+	KEY_LENGTH_SIZE = 2
 )
 
 type Key []byte
@@ -64,8 +66,8 @@ func calculateEstimatedBlockMetaSize(blockMeta []BlockMeta) int{
 	estSize := META_BLOCK_COUNT_SIZE
 	for _,meta := range blockMeta{
 		estSize += META_OFFSET_SIZE
-		estSize += 2 + len(meta.firstKey)
-		estSize += 2 + len(meta.lastKey)
+		estSize += KEY_LENGTH_SIZE + len(meta.firstKey)
+		//estSize += 2 + len(meta.lastKey)
 	}
 	return estSize
 }
@@ -79,8 +81,8 @@ func encodeBlockMetaData(blockMeta []BlockMeta)([]byte){
 		binary.Write(buf,binary.BigEndian,meta.offset)
 		binary.Write(buf,binary.BigEndian,uint16(len(meta.firstKey)))
 		binary.Write(buf,binary.BigEndian,meta.firstKey)
-		binary.Write(buf,binary.BigEndian,uint16(len(meta.lastKey)))
-		binary.Write(buf,binary.BigEndian,meta.lastKey)
+		//binary.Write(buf,binary.BigEndian,uint16(len(meta.lastKey)))
+		//binary.Write(buf,binary.BigEndian,meta.lastKey)
 	}
 	return buf.Bytes()
 }
@@ -93,12 +95,12 @@ func decodeBlockMetaData(data []byte) []BlockMeta{
 	//TODO: handle errors
 	for i:=uint32(0);i<numEntries;i++ {
 		var meta BlockMeta
-		var firstKeyLen, lastKeyLen uint16
+		var firstKeyLen uint16
 		binary.Read(buf,binary.BigEndian,&meta.offset)
 		binary.Read(buf,binary.BigEndian,&firstKeyLen)
 		meta.firstKey = make([]byte, firstKeyLen)
-		binary.Read(buf,binary.BigEndian,&lastKeyLen)
-		meta.lastKey = make([]byte, lastKeyLen)
+		//binary.Read(buf,binary.BigEndian,&lastKeyLen)
+		//meta.lastKey = make([]byte, lastKeyLen)
 		blockMeta = append(blockMeta, meta)
 	}
 	return blockMeta
@@ -127,23 +129,35 @@ func (s *SSTable) getBlockCount() int{
 	return len(s.blockMeta)
 }
 
-func (s *SSTable) readBlock(idx uint)*block.Block{
-	blockMeta := s.blockMeta[idx]
-	var blockEndOffset uint = 0
-	if idx+1<uint(len(s.blockMeta)){
-		blockEndOffset = uint(s.blockMeta[idx+1].offset)
-	} else { blockEndOffset = uint(blockMeta.offset)}
-	fmt.Printf("BLCK ENDOFF IS %d, METAOFF IS %d,\n",blockEndOffset,blockMeta.offset)
+func (s *SSTable) readBlock(blockIdx int)*block.Block{
+	blockMeta := s.blockMeta[blockIdx]
+	var blockEndOffset uint32 = 0
+	if blockIdx+1 < len(s.blockMeta) {
+		blockEndOffset = s.blockMeta[blockIdx+1].offset
+	} else {
+		blockEndOffset = s.blockMetaOffset // Last block ends at block meta offset
+	}
+	//fmt.Printf("BLCK ENDOFF IS %d, METAOFF IS %d,\n",blockEndOffset,blockMeta.offset)
 	
-	blockLen := int(blockEndOffset) - int(blockMeta.offset) - int(META_OFFSET_SIZE)
-	fmt.Printf("BLEN IS %d\n",blockLen)
-	if blockLen < 0 {
-		fmt.Println("Negative block length, skipping read")
+	blockLen := int(blockEndOffset - blockMeta.offset - META_OFFSET_SIZE)
+
+	if blockLen <= 0 {
+		fmt.Printf("invalid block length")
 		return nil
 	}
-	blockData := make([]byte,blockLen)
-	
-	s.fileWrap.file.ReadAt(blockData,int64(blockMeta.offset))
+	blockDataWithChecksum := make([]byte, blockEndOffset-blockMeta.offset)
+	_, err := s.fileWrap.file.ReadAt(blockDataWithChecksum, int64(blockMeta.offset))
+	if err != nil {
+		fmt.Printf(err.Error())
+		return nil
+	}
+	blockData := blockDataWithChecksum[:blockLen]
+	checksum := binary.BigEndian.Uint32(blockDataWithChecksum[blockLen:])
+	if checksum != crc32.ChecksumIEEE(blockData) {
+		fmt.Printf("block checksum mismatched")
+		return nil
+	}
+
 	block, _ := block.Decode(blockData)
 	return block
 }
@@ -160,12 +174,12 @@ func (s *SSTable) getBlockIdx(key []byte) int{
 
 func SeekToKeyBlock(sst *SSTable,key []byte) (*block.BlockIterator,int){
 	blockIdx := sst.getBlockIdx(key)
-	blk := sst.readBlock(uint(blockIdx))
+	blk := sst.readBlock(blockIdx)
 	blockIter := block.CreateBlockIterAndSeekToKey(blk,key)
 	if !blockIter.IsValid(){
 		blockIdx+=1
 		if blockIdx<= sst.getBlockCount(){
-			blk = sst.readBlock(uint(blockIdx))
+			blk = sst.readBlock(blockIdx)
 			blockIter = block.CreateBlockIterAndSeekToFirst(blk)
 		}
 	}
@@ -214,7 +228,7 @@ func (si *SSTIterator) Next() error{
 	if !si.blockIter.IsValid(){
 		si.blockIdx += 1
 		if si.blockIdx < si.sst.getBlockCount(){
-			blk := si.sst.readBlock(uint(si.blockIdx))
+			blk := si.sst.readBlock(si.blockIdx)
 			si.blockIter = block.CreateBlockIterAndSeekToFirst(blk)
 		}
 	}

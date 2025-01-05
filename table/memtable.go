@@ -2,6 +2,7 @@ package table
 
 import (
 	wal "anchordb/wal"
+	"bytes"
 
 	"github.com/huandu/skiplist"
 )
@@ -19,7 +20,7 @@ type MemtableIterator struct{
 
 func CreateNewMemTable(id int) *Memtable{
 	return &Memtable{
-		skiplist: *skiplist.New(skiplist.String),
+		skiplist: *skiplist.New(skiplist.Bytes),
 		size: 0,
 		id: id,
 	}
@@ -28,7 +29,7 @@ func CreateNewMemTable(id int) *Memtable{
 func CreateNewMemTableWithWal(id int,path string) *Memtable{
 	
 	return &Memtable{
-		skiplist: *skiplist.New(skiplist.String),
+		skiplist: *skiplist.New(skiplist.Bytes),
 		size: 0,
 		wal: wal.OpenWAL(path),
 		id: id,
@@ -45,37 +46,43 @@ func (m *Memtable) GetID()int {
 
 func (m *Memtable) Put(entry *Entry) error{
 
-	valueSize := int64(len(entry.value))
+	valueSize := int64(len(entry.internalValue.value))
 	existing := m.skiplist.Get(entry.key)
 	if existing!=nil{
-		m.size -= int64(len(existing.Value.(*Entry).value))
+		m.size -= int64(len(existing.Value.(*InternalValue).value))
 	} else {
 		m.size += int64(len(entry.key))
 	}
 	m.size+=valueSize
 	
-	m.skiplist.Set(entry.key,entry)
+	m.skiplist.Set(entry.key,entry.internalValue)
 
 	return nil
 }
 
-func (m *Memtable) Get(key string) (*Entry,bool){
+func (m *Memtable) Get(key []byte) (*Entry,bool){
 	value,ok := m.skiplist.GetValue(key)
 	if !ok{
 		return nil,false
 	}
-	return value.(*Entry),true
+	var internalValue *InternalValue = value.(*InternalValue)
+	entry:= &Entry{key, internalValue}
+	return entry,true
 } 
 
-func (m *Memtable) Scan(start string, end string) []*Entry{
+func (m *Memtable) Scan(start []byte, end []byte) []*Entry{
 	var entries []*Entry
 	i := m.skiplist.Find(start)
 	for i!=nil{
-		if i.Element().Key().(string) > end{
-			break
-		}
-		entries = append(entries, i.Value.(*Entry))
-		i = i.Next()
+		if bytes.Compare(i.Element().Key().([]byte), end) > 0 {
+            break
+        }
+		entry := i.Value.(*Entry)
+        if !entry.internalValue.tombstone {
+            entries = append(entries, entry)
+        }
+
+        i = i.Next()
 	}
 	return entries
 }
@@ -84,8 +91,9 @@ func (m *Memtable) Flush(s *SSTBuilder) {
 	var k,v []byte
 	elem := m.skiplist.Front()
 	for elem!=nil{
-		k=elem.Value.(*Entry).Key()
-		v=elem.Value.(*Entry).Value()
+		k = elem.Key().([]byte)
+		v=elem.Value.(*InternalValue).Value()
+		//fmt.Printf("adding key:%s, value:%s\n",string(k),string(v))
 		s.Add(k,v)
 		elem= elem.Next()
 	}

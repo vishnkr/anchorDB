@@ -2,6 +2,7 @@ package table
 
 import (
 	"anchordb/block"
+	"encoding/binary"
 	"fmt"
 	"hash/crc32"
 )
@@ -22,7 +23,7 @@ func NewSSTBuilder(blockSize int) *SSTBuilder{
 		blockSize: blockSize,
 		blockMeta: make([]BlockMeta, 0),
 		firstKey: make([]byte, 0),
-		lastKey: make([]byte, 0),
+		//lastKey: make([]byte, 0),
 		data: make([]byte, 0),
 	}
 }
@@ -38,7 +39,7 @@ func (b *SSTBuilder) Add(key []byte,value []byte) {
 		return
 	}
 	// add failed - no space left in block
-	b.addBlock()
+	b.addBlockToSST()
 	b.firstKey = append([]byte{}, key...)
 	b.lastKey = append([]byte{}, key...)
 	if !b.blockBuilder.Add(key, value) {
@@ -47,38 +48,38 @@ func (b *SSTBuilder) Add(key []byte,value []byte) {
 }
 
 func (b *SSTBuilder) Build(tableId int,path string) *SSTable{
-	b.addBlock()
+	b.addBlockToSST()
 	buf := b.data
-	metaOff := uint32(len(buf))
-	encoded := encodeBlockMetaData(b.blockMeta)
-	buf = append(buf, encoded...)
-	buf = append(buf, byte(metaOff))
+	metaOffset := uint32(len(buf))
+	encodedMetaData := encodeBlockMetaData(b.blockMeta)
+	buf = append(buf, encodedMetaData...)
+	buf = append(buf, byte(metaOffset))
 	fileWrap,err := CreateFileWrapper(path,buf)
 	if err!=nil{
 		fmt.Printf("err : %s",err.Error())
 	}
 	firstKey := b.blockMeta[0].firstKey
-	lastKey := b.blockMeta[len(b.blockMeta)-1].lastKey
+	//lastKey := b.blockMeta[len(b.blockMeta)-1].lastKey
 	return &SSTable{
 		id: tableId,
 		fileWrap: fileWrap,
 		firstKey: firstKey,
-		lastKey: lastKey,
 		blockMeta: b.blockMeta,
-		blockMetaOffset: metaOff,
+		blockMetaOffset: metaOffset,
 	}
 }
 
-func (b *SSTBuilder) addBlock(){
+func (b *SSTBuilder) addBlockToSST(){
 	blk := b.blockBuilder.Build()
 	encoded := blk.Encode()
 	b.blockMeta = append(b.blockMeta, BlockMeta{
 		offset: uint32(len(b.data)),
-		firstKey: b.firstKey,
-		lastKey: b.lastKey,
+		firstKey: b.blockBuilder.FirstKey(),
 	})
 	checksum := crc32.ChecksumIEEE(encoded)
+	var checksumBuf [4]byte
+	binary.BigEndian.PutUint32(checksumBuf[:], checksum)
 	b.data = append(b.data, encoded...)
-	b.data = append(b.data, byte(checksum))
+	b.data = append(b.data, checksumBuf[:]...)
 	b.blockBuilder = block.NewBlockBuilder(b.blockSize)
 }
