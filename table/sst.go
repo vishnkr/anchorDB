@@ -34,7 +34,7 @@ type BlockMeta struct{
 }
 
 type SSTable struct{
-	id int
+	Id int
 	blockMeta []BlockMeta
 	blockMetaOffset uint32
 	fileWrap *FileWrapper
@@ -52,6 +52,12 @@ type LevelIterator struct{
 	levelSSTs []*SSTable
 	sstIter *SSTIterator
 	curIdx int
+}
+
+type SSTConcatIter struct{
+	sstIter *SSTIterator
+	nextId int
+	sstables []*SSTable
 }
 
 func (s *SSTable) GetFirstKey()[]byte{
@@ -117,7 +123,7 @@ func OpenSSTable(id int,f *FileWrapper) *SSTable{
 	lastKey := blockMeta[len(blockMeta)-1].lastKey
 
 	return &SSTable{
-		id: id,
+		Id: id,
 		blockMeta: blockMeta,
 		fileWrap: f,
 		firstKey: firstKey,
@@ -220,6 +226,71 @@ func CreateSSTIterAndSeekToFirst(sst *SSTable)*SSTIterator{
 		blockIter: iter,
 	}
 
+}
+
+
+func CreateSSTConcatIterAndSeekToFirst(sstables []*SSTable) *SSTConcatIter{
+	if len(sstables)==0{
+		return &SSTConcatIter{
+			sstables: sstables,
+			nextId: 0,
+		}
+	}
+	iter := SSTConcatIter{
+		sstIter : CreateSSTIterAndSeekToFirst(sstables[0]),
+		nextId: 1,
+		sstables: sstables,
+	}
+	iter.moveUntilValid()
+	return &iter
+}
+
+func (s *SSTConcatIter) moveUntilValid() error{
+	for {
+		if s.sstIter == nil{
+			return nil
+		}
+		if s.sstIter.IsValid(){
+			return nil
+		}
+		if s.nextId >= len(s.sstables){
+			s.sstIter = nil
+			return nil
+		}
+		s.sstIter = CreateSSTIterAndSeekToFirst(s.sstables[s.nextId])
+		s.nextId+=1
+	}
+}
+
+func (s *SSTConcatIter) IsValid() bool {
+    if s.sstIter == nil {
+        return false
+    }
+    return s.sstIter.IsValid()
+}
+
+func (s *SSTConcatIter) Key() []byte {
+    if !s.IsValid() {
+        return nil
+    }
+    return s.sstIter.Key()
+}
+
+func (s *SSTConcatIter) Value() []byte {
+    if !s.IsValid() {
+        return nil
+    }
+    return s.sstIter.Value()
+}
+
+func (s *SSTConcatIter) Next() error {
+    if !s.IsValid() {
+        return nil
+    }
+    if err := s.sstIter.Next(); err != nil {
+        return err
+    }
+    return s.moveUntilValid()
 }
 
 // StorageIterator interface implementation for SSTIterator

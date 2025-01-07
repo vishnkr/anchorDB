@@ -31,7 +31,8 @@ type Storage struct {
 	store *LSMStore
 	options StorageOptions
 	nextId int
-	storeLock sync.Mutex
+	storeLock sync.RWMutex
+	mu sync.Mutex
 	path string
 	flushNotifier chan struct{}
 	flushStop chan struct{}
@@ -43,6 +44,7 @@ type StorageOptions struct{
 	maxMemTableCount int
 	blockSize uint
 	targetSstSize uint
+	compactionType CompactionType
 }
 
 func setupStorage(path string,options StorageOptions) (*Storage,error){
@@ -297,4 +299,8 @@ func (s *Storage) shouldTriggerFlush(){
 
 func (s *Storage) stopFlushTrigger(){
 	close(s.flushStop)
+}
+
+func (s *Storage) getSSTPath(id int) string{
+	return fmt.Sprintf("%s/%d.sst",s.store.path,id)
 }
