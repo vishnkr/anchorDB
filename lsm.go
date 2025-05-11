@@ -75,11 +75,12 @@ func (s *Storage) Put(key string, value []byte) error{
 	if len(value) == 0 {
 		return errors.New("value cannot be empty")
 	}
-	s.attemptFreeze()
+	
 	err := s.store.Put(key, value)
 	if err != nil {
 		return err
 	}
+	s.attemptFreeze()
 	
 	return nil
 }
@@ -167,11 +168,14 @@ func (l *LSMStore) Get(key []byte) (*table.Entry,error){
 	}
 	var iter *table.SSTIterator
 	l0Iters := make([]*table.SSTIterator, 0, len(l.l0SSTables))
+	fmt.Println("we here")
 	for _,tableId := range l.l0SSTables{
 		if sst,ok := l.sstables[tableId]; ok{
-			if bytes.Compare(key, sst.GetFirstKey()) >= 0 {
+			if bytes.Compare(key, sst.GetFirstKey()) >= 0 && bytes.Compare(key, sst.GetLastKey()) <= 0{
 				iter = table.CreateSSTIterAndSeekToKey(sst, key)
-				l0Iters = append(l0Iters, iter)
+				if iter.IsValid() && bytes.Equal(iter.Key(), key) {
+					l0Iters = append(l0Iters, iter)
+				}
 			}
 		}
 	}
@@ -239,6 +243,7 @@ func (s *Storage) flushLastImmutableMemTable() error{
 	var flushMemtable *table.Memtable
 	s.store.mu.RLock()
 	immCount := len(s.store.immutable)
+	fmt.Println("flushing,",immCount,"tables")
 	if(immCount==0){
 		s.store.mu.RUnlock()
         return nil
@@ -254,13 +259,48 @@ func (s *Storage) flushLastImmutableMemTable() error{
 	)
 	s.store.mu.Lock()
 	defer s.store.mu.Unlock()
-	
+	fmt.Println("got sst")
 	s.store.immutable = s.store.immutable[:immCount-1]
 	s.store.l0SSTables = append([]int{flushMemtable.GetID()},s.store.l0SSTables...)
 	s.store.sstables[flushMemtable.GetID()]=sst
 	syncDir(s.path)
 	return nil
 }
+
+func (s *Storage) flushAllImmutableMemTables() error {
+	s.storeLock.Lock()
+	defer s.storeLock.Unlock()
+
+	for {
+		s.store.mu.RLock()
+		immCount := len(s.store.immutable)
+		if immCount == 0 {
+			s.store.mu.RUnlock()
+			break
+		}
+		flushMemtable := s.store.immutable[immCount-1]
+		s.store.mu.RUnlock()
+
+		sstBuilder := table.NewSSTBuilder(int(s.options.blockSize))
+		flushMemtable.Flush(sstBuilder)
+		sstPath := filepath.Join(s.path, fmt.Sprintf("%d.sst", flushMemtable.GetID()))
+		sst := sstBuilder.Build(
+			flushMemtable.GetID(),
+			sstPath,
+		)
+
+		s.store.mu.Lock()
+		s.store.immutable = s.store.immutable[:immCount-1]
+		s.store.l0SSTables = append([]int{flushMemtable.GetID()}, s.store.l0SSTables...)
+		s.store.sstables[flushMemtable.GetID()] = sst
+		s.store.mu.Unlock()
+
+		syncDir(s.path)
+		fmt.Printf("Flushed memtable %d to %s\n", flushMemtable.GetID(), sstPath)
+	}
+	return nil
+}
+
 
 func (s *Storage) spawnFlushTrigger(){
 	go func ()  {
@@ -272,7 +312,8 @@ func (s *Storage) spawnFlushTrigger(){
 			case <- ticker.C:
 				s.shouldTriggerFlush()
 			case <-s.flushNotifier:
-				if err:=s.flushLastImmutableMemTable();err!=nil{
+				fmt.Println("got flush")
+				if err:=s.flushAllImmutableMemTables();err!=nil{
 					fmt.Println("Flush failed:", err)
 				}	
 			case <-s.flushStop:
@@ -288,6 +329,7 @@ func (s *Storage) shouldTriggerFlush(){
 	s.store.mu.RLock()
 	defer s.store.mu.RUnlock()
 	if(len(s.store.immutable)+1 >= s.options.maxMemTableCount){
+		fmt.Print("noti flush")
 		select {
 		case s.flushNotifier <- struct{}{}:
 		default:

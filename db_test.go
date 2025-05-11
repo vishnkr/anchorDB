@@ -37,24 +37,30 @@ func TestWriteFile(t *testing.T){
 	}
 }
 func TestReadWriteMemtables(t *testing.T) {
-	numKeys := 10000000
+	numKeys := 100000
 	var k,v string
 	//require.NoError(t,err)
 	db,err := Open("data")
 	require.NoError(t,err)
 	keys := make([]string,numKeys)
+	const longString = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. " +
+    "Curabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra, est eros bibendum elit, nec luctus magna felis sollicitudin mauris. Integer in mauris eu nibh euismod gravida. Duis ac tellus et risus vulputate vehicula. Donec lobortis risus a elit. Etiam tempor. Ut ullamcorper, ligula eu tempor congue, eros est euismod turpis, id tincidunt sapien risus a quam. Maecenas fermentum consequat mi. Donec fermentum. Pellentesque malesuada nulla a mi. Duis sapien sem, aliquet nec, commodo eget, consequat quis, neque. Aliquam faucibus, elit ut dictum aliquet, felis nisl adipiscing sapien, sed malesuada diam lacus eget erat.";
+
 	for i:=0;i<numKeys;i++{
 		k = fmt.Sprintf("key-%d",i) //genRandString(5)
 		keys[i] = k
-		v = "Value_"+ fmt.Sprint(i)
+		v = "Value_"+ fmt.Sprint(i)//+longString
 		db.Put(k,[]byte(v))
 	}
+	fmt.Println("write done")
 	for i:=0;i<numKeys;i++{
 		k = keys[i]
-		_,err := db.Get(k)
+		key,err := db.Get(k)
 		if(err!=nil){//[]byte("Value_"+ fmt.Sprint(i))){
-			fmt.Printf("%s\n",err.Error())
-			//fmt.Printf("Value %d is %s\n",i,string(db.Get(k)))
+			fmt.Println(err.Error())
+			fmt.Println("Value",i,"is",string(key))
+		} else{
+			//fmt.Println("Value",i,"is",string(key))
 		}
 		//db.Get(k),[]byte("Value_"+ fmt.Sprint(i)))
 	}

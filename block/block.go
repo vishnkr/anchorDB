@@ -164,16 +164,14 @@ func (bi *BlockIterator) IsValid() bool{
 func (bi *BlockIterator) SeekToKey(key []byte){
 	low, high:= 0, len(bi.block.offsets)-1
 	for low < high{
-		mid := (low + (high-low))/2
+		mid := (low + (high-low)/2)
 		bi.SeekTo(mid)
-
-		switch bytes.Compare(bi.Key(),key){
-		case -1: // bi.key < key
-			low = mid +1
-		case 1: // bi.key > key
+		cmp := bytes.Compare(bi.Key(), key)
+		if cmp < 0 {
+			low = mid + 1
+		} else {
+			// if equal or greater, narrow search window leftward
 			high = mid
-		case 0:
-			break
 		}
 	}
 	bi.SeekTo(low)

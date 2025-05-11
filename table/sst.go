@@ -81,8 +81,8 @@ func encodeBlockMetaData(blockMeta []BlockMeta)([]byte){
 		binary.Write(buf,binary.BigEndian,meta.offset)
 		binary.Write(buf,binary.BigEndian,uint16(len(meta.firstKey)))
 		binary.Write(buf,binary.BigEndian,meta.firstKey)
-		//binary.Write(buf,binary.BigEndian,uint16(len(meta.lastKey)))
-		//binary.Write(buf,binary.BigEndian,meta.lastKey)
+		binary.Write(buf,binary.BigEndian,uint16(len(meta.lastKey)))
+		binary.Write(buf,binary.BigEndian,meta.lastKey)
 	}
 	return buf.Bytes()
 }
