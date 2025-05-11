@@ -1,92 +1,107 @@
 package table
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
 	"math"
 )
 
+type BloomFilter struct {
+    filter []byte
+    k      uint8
+}
+
 const (
-	BLOOM_FILTER_CHECKSUM_SIZE = 4
-	HASH_FUNCTIONS_SIZE	 = 1
+    // CRC32 over (filter||k)
+    bloomChecksumSize = 4
+    // one byte to store k
+    bloomKSize = 1
 )
-type BloomFilter struct{
-	filter []byte
-	k uint8
-}
 
-func setBit(data []byte, idx int, isSet bool) {
-    pos := idx / 8
-    offset := uint(idx % 8)
-    if isSet {
-        data[pos] |= 1 << offset
-    } else {
-        data[pos] &^= 1 << offset
+// BuildFromKeyHashes builds a Bloom filter from 32-bit key hashes.
+func BuildFromKeyHashes(keys []uint32, falsePositiveRate float64) *BloomFilter {
+    n := len(keys)
+    // bits per key: m = -n ln(p) / (ln2)^2, then m/n
+    m := -float64(n) * math.Log(falsePositiveRate) / (math.Ln2 * math.Ln2)
+    bitsPerKey := int(math.Ceil(m / float64(n)))
+    kf := int(math.Ceil(float64(bitsPerKey) * math.Ln2)) // optimal k
+    if kf < 1 {
+        kf = 1
     }
-}
-
-func getBit(data []byte, idx int) bool{
-	pos := idx/8
-	offset := uint(idx%8)
-	return data[pos] & (1 << offset) !=0
-}
-
-func bitsPerKey(entries int, falsePositiveRate float64) int {
-	// Calculate the size of the Bloom filter in bits
-	size := -1.0 * float64(entries) * math.Log(falsePositiveRate) / math.Pow(math.Ln2, 2)
-	// Calculate the number of bits per key, rounding up
-	bitsPerKey := math.Ceil(size / float64(entries))
-	return int(bitsPerKey)
-}
-
-// Calculate the optimal number of hash functions.
-func calculateHashFunctions(bitsPerKey, numKeys int) int {
-    // k = (m / n) * ln(2)
-    return int(math.Ceil(float64(bitsPerKey) * math.Ln2))
-}
-
-func generateFromKeyHashes(keys []uint32,bitsPerKey int) *BloomFilter{
-	k := uint8(math.Max(1,math.Min(30,float64(bitsPerKey)*0.69)))
-	nbits := int(math.Max(64,float64(len(keys)*bitsPerKey)))
-	bytes := (nbits + 7)/ 8
-	bloom := make([]byte,bytes)
-	for _,h := range keys{
-		d := (h >> 17) | (h >> 15)
-		for i:= 0; i< int(k); i++{
-			pos := int(h) % nbits
-			setBit(bloom,pos,true)
-			h += d
-		}
-	}
-	return &BloomFilter{
-		filter: bloom,
-		k: k,
-	}
-}
-
-func Decode(buf []byte) (*BloomFilter,error){
-	if len(buf) < BLOOM_FILTER_CHECKSUM_SIZE + 1 {
-        return nil, fmt.Errorf("buffer too small")
+    if kf > 30 {
+        kf = 30
     }
-    
-	bloomCheckSum := binary.BigEndian.Uint32(buf[len(buf)-BLOOM_FILTER_CHECKSUM_SIZE:])
-	data := buf[:len(buf)-BLOOM_FILTER_CHECKSUM_SIZE]
-	if crc32.ChecksumIEEE(data)!=bloomCheckSum{
-		return nil, fmt.Errorf("checksum mismatch")
-	}
-	bloom := data[:len(data)-HASH_FUNCTIONS_SIZE]
-	k := data[len(data)-HASH_FUNCTIONS_SIZE]
-	return &BloomFilter{
-		filter: bloom,
-		k: k,
-	},nil
+    k := uint8(kf)
+
+    // ensure at least 64 bits
+    totalBits := bitsPerKey * n
+    if totalBits < 64 {
+        totalBits = 64
+    }
+    totalBits = ((totalBits + 7) / 8) * 8 // round up to full bytes
+    bytesLen := totalBits / 8
+
+    filter := make([]byte, bytesLen)
+    for _, h32 := range keys {
+        // expand to 64-bit so delta arithmetic matches Rust
+        h := uint64(h32)
+        delta := (h >> 17) | (h << 15)
+        for i := 0; i < int(k); i++ {
+            pos := int(h % uint64(totalBits))
+            filter[pos/8] |= 1 << (pos % 8)
+            h += delta
+        }
+    }
+    return &BloomFilter{filter: filter, k: k}
 }
 
-func (b *BloomFilter) Encode(buf *bytes.Buffer){
-	buf.Write(b.filter)
-	buf.WriteByte(b.k)
-	checkSum := crc32.ChecksumIEEE(buf.Bytes())
-	binary.Write(buf,binary.BigEndian,checkSum)
+// Encode appends (filter||k||crc32(filter||k)) to dst and returns the new slice.
+func (bf *BloomFilter) Encode(dst []byte) []byte {
+    // append filter
+    dst = append(dst, bf.filter...)
+    // append k
+    dst = append(dst, bf.k)
+    // compute crc32 over (filter||k)
+    cs := crc32.ChecksumIEEE(dst[len(dst)-len(bf.filter)-1:])
+    // append 4-byte big-endian crc32
+    tmp := make([]byte, 4)
+    binary.BigEndian.PutUint32(tmp, cs)
+    dst = append(dst, tmp...)
+    return dst
+}
+
+// Decode verifies the CRC32 and returns a new BloomFilter or an error.
+func DecodeBloom(buf []byte) (*BloomFilter, error) {
+    if len(buf) < bloomChecksumSize+bloomKSize {
+        return nil, fmt.Errorf("buffer too small for bloom")
+    }
+    // split out crc
+    crcOff := len(buf) - bloomChecksumSize
+    stored := binary.BigEndian.Uint32(buf[crcOff:])
+    data := buf[:crcOff]
+    // verify
+    if crc32.ChecksumIEEE(data) != stored {
+        return nil, fmt.Errorf("bloom checksum mismatch")
+    }
+    // k is the last byte of data
+    k := data[len(data)-1]
+    filter := make([]byte, len(data)-1)
+    copy(filter, data[:len(data)-1])
+    return &BloomFilter{filter: filter, k: k}, nil
+}
+
+// MayContain returns true if key (32-bit hash) may be in the set.
+func (bf *BloomFilter) MayContain(hash32 uint32) bool {
+    totalBits := len(bf.filter) * 8
+    h := uint64(hash32)
+    delta := (h >> 17) | (h << 15)
+    for i := 0; i < int(bf.k); i++ {
+        pos := int(h % uint64(totalBits))
+        if (bf.filter[pos/8] & (1 << (pos % 8))) == 0 {
+            return false
+        }
+        h += delta
+    }
+    return true
 }

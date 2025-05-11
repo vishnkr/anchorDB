@@ -85,7 +85,7 @@ func (s *Storage) triggerCompaction() error{
 }
 
 func (s *Storage) performFullCompaction() error {
-	if _, ok := s.options.compactionType.(NoCompaction); !ok {
+	if _, ok := s.options.CompactionType.(NoCompaction); !ok {
 		return errors.New("full compaction cannot be performed when compaction is enabled")
 	}
 	s.storeLock.Lock()
@@ -98,9 +98,9 @@ func (s *Storage) performFullCompaction() error {
 		L1SSTables: l1sst,
 	}
 
-	sstables := s.compact(compactTask)
+	sstables,_ := s.compact(compactTask)
 	s.storeLock.Lock()
-	snapshot = *s.store
+	//snapshot = *s.store
 	s.storeLock.RUnlock()
 	for _, sst := range append(l0sst, l1sst...) {
 		delete(snapshot.sstables, sst)
@@ -162,7 +162,7 @@ func (s *Storage) compact(compactionTask CompactionTask) ([]table.SSTable,error)
 			}
 			l1SSTs = append(l1SSTs, sst)
 		}
-		mergeIter,err := table.NewTwoMergeIterator(
+		_,err := table.NewTwoMergeIterator(
 			table.NewMergeIterator(l0Iters),
 			table.CreateSSTConcatIterAndSeekToFirst(l1SSTs),
 		)

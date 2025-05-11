@@ -11,7 +11,7 @@ var db *AnchorDB
 
 func InitializeCLI() *cobra.Command {
 	var err error
-			db, err = Open("data")
+			db, err = Open("data",nil)
 			if err != nil {
 				log.Fatalf("Failed to open database: %v", err)
 			}
@@ -32,7 +32,7 @@ var putCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		key, value := args[0], []byte(args[1])
-		db.Put(key, value)
+		db.Put([]byte(key), value)
 		fmt.Printf("Stored key=%s, value=%s\n", key, value)
 	},
 }
@@ -43,7 +43,7 @@ var getCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
-		value,err := db.Get(key)
+		value,err := db.Get([]byte(key))
 		if err != nil {
 			fmt.Printf("Key %s does not exist\n",key)
 		} else {
