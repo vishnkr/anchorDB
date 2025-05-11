@@ -7,11 +7,17 @@ type BlockBuilder struct{
 	data []byte
 	blockSize int
 	firstKey []byte
+	lastKey []byte
 }
 
 func (b *BlockBuilder) FirstKey() []byte{
 	return b.firstKey
 }
+
+func (b *BlockBuilder) LastKey() []byte {
+	return b.lastKey
+}
+
 
 func NewBlockBuilder(size int) *BlockBuilder{
 	return &BlockBuilder{
@@ -19,6 +25,7 @@ func NewBlockBuilder(size int) *BlockBuilder{
 		data: make([]byte, 0),
 		blockSize: size,
 		firstKey: make([]byte, 0),
+		lastKey: make([]byte,0),
 	}
 }
 
@@ -68,6 +75,8 @@ func (b *BlockBuilder) oldAdd(key []byte,value []byte) bool{
 		b.firstKey = make([]byte, len(key))
 		copy(b.firstKey,key)
 	}
+	b.lastKey = b.lastKey[:0] // reuse memory
+	b.lastKey = append(b.lastKey, key...) 
 	return true
 }
 
@@ -128,5 +137,7 @@ func (b *BlockBuilder) Add(key []byte,value []byte) bool{
         b.firstKey = make([]byte, len(key))
         copy(b.firstKey, key)
     }
+	b.lastKey = b.lastKey[:0]
+	b.lastKey = append(b.lastKey, key...) 
 	return true
 }

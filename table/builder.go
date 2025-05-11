@@ -59,11 +59,12 @@ func (b *SSTBuilder) Build(tableId int,path string) *SSTable{
 		fmt.Printf("err : %s",err.Error())
 	}
 	firstKey := b.blockMeta[0].firstKey
-	//lastKey := b.blockMeta[len(b.blockMeta)-1].lastKey
+	lastKey := b.blockMeta[len(b.blockMeta)-1].lastKey
 	return &SSTable{
 		id: tableId,
 		fileWrap: fileWrap,
 		firstKey: firstKey,
+		lastKey: lastKey,
 		blockMeta: b.blockMeta,
 		blockMetaOffset: metaOffset,
 	}
@@ -75,6 +76,7 @@ func (b *SSTBuilder) addBlockToSST(){
 	b.blockMeta = append(b.blockMeta, BlockMeta{
 		offset: uint32(len(b.data)),
 		firstKey: b.blockBuilder.FirstKey(),
+		lastKey: b.blockBuilder.LastKey(),
 	})
 	checksum := crc32.ChecksumIEEE(encoded)
 	var checksumBuf [4]byte
