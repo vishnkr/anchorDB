@@ -40,6 +40,7 @@ type SSTable struct{
 	fileWrap *FileWrapper
 	firstKey []byte
 	lastKey []byte
+	bloomFilter BloomFilter
 }
 
 type SSTIterator struct{
