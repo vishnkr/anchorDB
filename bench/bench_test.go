@@ -16,7 +16,9 @@ type BenchmarkCase struct {
 
 
 func TestBenchmarkLSMDB(t *testing.T) {
-
+	if err := os.MkdirAll("pprofs", os.ModePerm); err != nil {
+		t.Fatal("could not create pprofs directory: ", err)
+	}
 	cases := []BenchmarkCase{
 		{
 			Name: "Default_4KB_NoBloom",
