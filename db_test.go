@@ -37,7 +37,7 @@ func TestWriteFile(t *testing.T){
 	}
 }
 func TestReadWriteMemtables(t *testing.T) {
-	numKeys := 100000
+	numKeys := 1000000
 	var k,v string
 	//require.NoError(t,err)
 	db,err := Open("data")

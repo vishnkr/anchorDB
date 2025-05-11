@@ -11,7 +11,7 @@ func Open(path string) (*AnchorDB,error){
 		enableWal: false,
 		maxMemTableCount: 2,
 		blockSize: 4000,
-		targetSstSize: 10240,//4194304,
+		targetSstSize: 4194304,
 	}
 
 	
